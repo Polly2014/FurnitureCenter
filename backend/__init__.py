@@ -1,0 +1,1 @@
+"""FurnitureCenter backend package."""

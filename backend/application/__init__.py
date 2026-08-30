@@ -1,0 +1,1 @@
+"""Application use cases shared by Web and MCP adapters."""

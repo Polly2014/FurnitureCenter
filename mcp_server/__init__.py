@@ -1,0 +1,1 @@
+"""FurnitureCenter MCP adapter."""

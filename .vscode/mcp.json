@@ -1,0 +1,12 @@
+{
+  "servers": {
+    "furniture-center": {
+      "type": "stdio",
+      "command": "${workspaceFolder}/X-Workspace/FurnitureCenter/.venv/Scripts/python.exe",
+      "args": ["-m", "mcp_server"],
+      "env": {
+        "FURNITURE_CENTER_DATABASE_URL": "sqlite:///${workspaceFolder}/X-Workspace/FurnitureCenter/furniture-center-catalog.db"
+      }
+    }
+  }
+}

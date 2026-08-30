@@ -1,0 +1,15 @@
+.env
+.venv/
+*.db
+*.sqlite3
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+/Furniture Reuse & Asset Sharing Platform*.xlsx
+/data/import/
+/frontend/public/media/furniture/imported/
+/tmp/
