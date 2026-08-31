@@ -12,6 +12,8 @@ import sys
 import tempfile
 from pathlib import Path, PurePosixPath
 
+from migration_safety import MigrationSafetyError, require_new_migration_output, sqlite_read_only
+
 TABLES = (
     "categories",
     "sites",
@@ -21,12 +23,6 @@ TABLES = (
     "inventory_adjustments",
     "audit_events",
 )
-
-
-def sqlite_read_only(path: Path) -> sqlite3.Connection:
-    connection = sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)
-    connection.row_factory = sqlite3.Row
-    return connection
 
 
 def atomic_write_json(path: Path, value: dict[str, object]) -> None:
@@ -54,6 +50,16 @@ def positions(connection: sqlite3.Connection) -> list[tuple[object, ...]]:
             "SELECT furniture_id, site_id, quantity_total, quantity_available, version "
             "FROM inventory ORDER BY furniture_id, site_id"
         )
+    ]
+
+
+def canonical_rows(
+    connection: sqlite3.Connection, table: str, columns: tuple[str, ...]
+) -> list[dict[str, object]]:
+    quoted_columns = ", ".join(f'"{column}"' for column in columns)
+    return [
+        dict(row)
+        for row in connection.execute(f'SELECT {quoted_columns} FROM "{table}" ORDER BY "id"')
     ]
 
 
@@ -94,6 +100,68 @@ def verify(source: Path, export_dir: Path, target: Path, r2_dir: Path) -> dict[s
                 mismatches.append("source row counts do not match exported manifest")
             if target_counts != expected_counts:
                 mismatches.append("target row counts do not match exported manifest")
+            source_columns = {
+                "categories": ("id", "name"),
+                "sites": ("id", "code", "name", "city", "latitude", "longitude"),
+                "furniture": (
+                    "id",
+                    "sku",
+                    "name",
+                    "name_en",
+                    "main_category",
+                    "description",
+                    "condition",
+                    "dimensions",
+                    "color",
+                    "material",
+                    "brand",
+                    "image_reference",
+                    "source_workbook",
+                    "source_sheet",
+                    "source_row",
+                    "source_metadata",
+                    "category_id",
+                    "created_at",
+                    "updated_at",
+                ),
+                "inventory": (
+                    "id",
+                    "furniture_id",
+                    "site_id",
+                    "quantity_total",
+                    "quantity_available",
+                    "version",
+                ),
+                "inventory_adjustments": (
+                    "id",
+                    "inventory_id",
+                    "kind",
+                    "delta_total",
+                    "delta_available",
+                    "quantity_total_before",
+                    "quantity_total_after",
+                    "quantity_available_before",
+                    "quantity_available_after",
+                    "transfer_id",
+                    "reason",
+                    "actor",
+                    "created_at",
+                ),
+                "audit_events": (
+                    "id",
+                    "entity_type",
+                    "entity_id",
+                    "action",
+                    "actor",
+                    "details_json",
+                    "created_at",
+                ),
+            }
+            for table, columns in source_columns.items():
+                if canonical_rows(source_db, table, columns) != canonical_rows(
+                    target_db, table, columns
+                ):
+                    mismatches.append(table)
             source_positions = positions(source_db)
             target_positions = positions(target_db)
             report["inventory_positions"] = len(source_positions)
@@ -108,7 +176,9 @@ def verify(source: Path, export_dir: Path, target: Path, r2_dir: Path) -> dict[s
             target_images = {
                 row["id"]: dict(row)
                 for row in target_db.execute(
-                    "SELECT id, object_key, mime_type, byte_size, width, height, sha256 "
+                    "SELECT id, furniture_id, object_key, mime_type, byte_size, width, height, "
+                    "sha256, "
+                    "alt_text, sort_order, is_primary, created_at "
                     "FROM furniture_images"
                 )
             }
@@ -124,9 +194,22 @@ def verify(source: Path, export_dir: Path, target: Path, r2_dir: Path) -> dict[s
                 raise ValueError("manifest image ID/object key is invalid")
             target_image = target_images.pop(image_id, None)
             check: dict[str, object] = {"id": image_id, "ok": True}
+            image_columns = (
+                "id",
+                "furniture_id",
+                "object_key",
+                "mime_type",
+                "byte_size",
+                "width",
+                "height",
+                "sha256",
+                "alt_text",
+                "sort_order",
+                "is_primary",
+                "created_at",
+            )
             if target_image is None or any(
-                target_image.get(key) != image.get(key)
-                for key in ("object_key", "mime_type", "byte_size", "width", "height", "sha256")
+                target_image.get(key) != image.get(key) for key in image_columns
             ):
                 check["ok"] = False
                 mismatches.append(f"image {image_id} target metadata mismatch")
@@ -166,11 +249,16 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    report = verify(args.source, args.export_dir, args.target, args.r2_dir)
     try:
+        args.report = require_new_migration_output(
+            args.report,
+            "reconciliation report",
+            (args.source, args.export_dir, args.target, args.r2_dir),
+        )
+        report = verify(args.source, args.export_dir, args.target, args.r2_dir)
         atomic_write_json(args.report, report)
-    except OSError as error:
-        print(f"cannot write reconciliation report: {error}", file=sys.stderr)
+    except (MigrationSafetyError, OSError) as error:
+        print(f"migration verification failed: {error}", file=sys.stderr)
         return 1
     if not report["ok"]:
         print("migration verification failed; see the redacted report", file=sys.stderr)

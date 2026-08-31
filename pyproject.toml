@@ -15,6 +15,7 @@ dependencies = [
     "mcp[cli]>=2,<3",
     "openai>=1.68,<3",
     "openpyxl>=3.1,<4",
+    "pillow>=10,<12",
     "pydantic-settings>=2.8,<3",
     "python-multipart>=0.0.20,<1",
     "sqlalchemy>=2.0,<3",

@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
 import sqlite3
 import subprocess
 import sys
@@ -16,7 +17,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 EXPORTER = PROJECT_ROOT / "scripts" / "export_sqlite_for_d1.py"
 VERIFIER = PROJECT_ROOT / "scripts" / "verify_cloudflare_migration.py"
 PNG_BYTES = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42mNg+M8AAAICAQB7CY1FAAAAAElFTkSuQmCC"
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGBgAAAABQABpfZFQAAAAABJRU5ErkJggg=="
 )
 
 
@@ -28,6 +29,12 @@ def run(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         check=check,
     )
+
+
+def approved_path(tmp_path: Path, name: str) -> Path:
+    """Return an isolated, Git-ignored output path inside the repository."""
+    identity = hashlib.sha256(str(tmp_path).encode()).hexdigest()[:12]
+    return PROJECT_ROOT / ".migration" / "pytest-contracts" / identity / name
 
 
 def create_source_db(path: Path, image_url: str = "/media/chair.png") -> None:
@@ -117,7 +124,7 @@ def export_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
     (asset_root / "media").mkdir()
     (asset_root / "media" / "chair.png").write_bytes(PNG_BYTES)
     create_source_db(source)
-    output = tmp_path / "migration-output"
+    output = approved_path(tmp_path, "migration-output")
     run(
         str(EXPORTER),
         "--source",
@@ -133,7 +140,7 @@ def export_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
 def test_export_is_deterministic_escaped_and_excludes_credentials(tmp_path: Path) -> None:
     """A wrongly ordered or unsafe exporter would change SQL or leak token rows."""
     source, output, asset_root = export_fixture(tmp_path)
-    second_output = tmp_path / "migration-output-2"
+    second_output = approved_path(tmp_path, "migration-output-2")
     run(
         str(EXPORTER),
         "--source",
@@ -180,7 +187,7 @@ def test_export_requires_explicit_staging_for_external_image_urls(tmp_path: Path
         "--source",
         str(source),
         "--output",
-        str(tmp_path / "output"),
+        str(approved_path(tmp_path, "output")),
         "--asset-root",
         str(tmp_path / "assets"),
         check=False,
@@ -200,7 +207,7 @@ def test_export_uses_explicitly_staged_external_image_bytes(tmp_path: Path) -> N
     (staging_root / "chair.png").write_bytes(PNG_BYTES)
     staging_manifest = tmp_path / "staging.json"
     staging_manifest.write_text(json.dumps({"img-1": "chair.png"}))
-    output = tmp_path / "output"
+    output = approved_path(tmp_path, "output")
 
     run(
         str(EXPORTER),
@@ -221,13 +228,13 @@ def test_export_uses_explicitly_staged_external_image_bytes(tmp_path: Path) -> N
 
 
 def test_export_creates_the_requested_ignored_output_parent(tmp_path: Path) -> None:
-    """A fresh dedicated output directory must not require a manual pre-creation step."""
+    """A fresh approved output directory must not require manual pre-creation."""
     source = tmp_path / "source.db"
     asset_root = tmp_path / "assets"
     (asset_root / "media").mkdir(parents=True)
     (asset_root / "media" / "chair.png").write_bytes(PNG_BYTES)
     create_source_db(source)
-    output = tmp_path / "ignored-migrations" / "one"
+    output = approved_path(tmp_path, "one")
 
     run(
         str(EXPORTER),
@@ -252,7 +259,7 @@ def test_verifier_reconciles_target_and_rejects_image_or_inventory_mismatches(
     with sqlite3.connect(target) as connection:
         connection.executescript((output / "d1-import.sql").read_text())
 
-    report = tmp_path / "reconciliation.json"
+    report = approved_path(tmp_path, "reconciliation.json")
     success = run(
         str(VERIFIER),
         "--source",
@@ -277,7 +284,7 @@ def test_verifier_reconciles_target_and_rejects_image_or_inventory_mismatches(
     with sqlite3.connect(target) as connection:
         connection.execute("UPDATE inventory SET quantity_available = 11 WHERE id = 'inv-bj'")
         connection.commit()
-    failed_report = tmp_path / "failed-reconciliation.json"
+    failed_report = approved_path(tmp_path, "failed-reconciliation.json")
     failure = run(
         str(VERIFIER),
         "--source",
@@ -316,10 +323,234 @@ def test_export_rejects_unsafe_identifiers(tmp_path: Path, unsafe_value: str) ->
         "--source",
         str(source),
         "--output",
-        str(tmp_path / "output"),
+        str(approved_path(tmp_path, "output")),
         "--asset-root",
         str(asset_root),
         check=False,
     )
     assert result.returncode != 0
     assert "unsafe" in result.stderr.lower()
+
+
+def test_export_rejects_unapproved_or_symlinked_output_without_writing(tmp_path: Path) -> None:
+    """An output outside a declared ignored root must never be created or escaped to."""
+    source = tmp_path / "source.db"
+    asset_root = tmp_path / "assets"
+    (asset_root / "media").mkdir(parents=True)
+    (asset_root / "media" / "chair.png").write_bytes(PNG_BYTES)
+    create_source_db(source)
+    unapproved = tmp_path / "unapproved-output"
+    rejected = run(
+        str(EXPORTER),
+        "--source",
+        str(source),
+        "--output",
+        str(unapproved),
+        "--asset-root",
+        str(asset_root),
+        check=False,
+    )
+    assert rejected.returncode != 0
+    assert not unapproved.exists()
+
+    outside = tmp_path / "outside"
+    link = approved_path(tmp_path, "escape-link")
+    link.parent.mkdir(parents=True)
+    link.symlink_to(outside, target_is_directory=True)
+    escaped = run(
+        str(EXPORTER),
+        "--source",
+        str(source),
+        "--output",
+        str(link / "export"),
+        "--asset-root",
+        str(asset_root),
+        check=False,
+    )
+    assert escaped.returncode != 0
+    assert not outside.exists()
+
+
+def test_verifier_rejects_unapproved_existing_and_input_collision_reports(tmp_path: Path) -> None:
+    """A report path cannot create outside the root or replace an existing input alias."""
+    source, output, _ = export_fixture(tmp_path)
+    target = tmp_path / "target.db"
+    apply_target_schema(target)
+    with sqlite3.connect(target) as connection:
+        connection.executescript((output / "d1-import.sql").read_text())
+    source_before = source.read_bytes()
+    target_before = target.read_bytes()
+    unapproved = tmp_path / "report.json"
+    rejected = run(
+        str(VERIFIER),
+        "--source",
+        str(source),
+        "--export",
+        str(output),
+        "--target",
+        str(target),
+        "--r2-dir",
+        str(output / "r2"),
+        "--report",
+        str(unapproved),
+        check=False,
+    )
+    assert rejected.returncode != 0
+    assert not unapproved.exists()
+
+    existing = approved_path(tmp_path, "existing.json")
+    existing.parent.mkdir(parents=True, exist_ok=True)
+    existing.write_text("keep")
+    existing_result = run(
+        str(VERIFIER),
+        "--source",
+        str(source),
+        "--export",
+        str(output),
+        "--target",
+        str(target),
+        "--r2-dir",
+        str(output / "r2"),
+        "--report",
+        str(existing),
+        check=False,
+    )
+    assert existing_result.returncode != 0
+    assert existing.read_text() == "keep"
+
+    collision = approved_path(tmp_path, "target-alias.json")
+    os.link(target, collision)
+    collision_result = run(
+        str(VERIFIER),
+        "--source",
+        str(source),
+        "--export",
+        str(output),
+        "--target",
+        str(target),
+        "--r2-dir",
+        str(output / "r2"),
+        "--report",
+        str(collision),
+        check=False,
+    )
+    assert collision_result.returncode != 0
+    assert source.read_bytes() == source_before
+    assert target.read_bytes() == target_before
+
+
+def test_export_and_verifier_support_uri_reserved_database_names(tmp_path: Path) -> None:
+    """Reserved file-URI characters must remain literal database filename characters."""
+    source = tmp_path / "source ? # 中文.db"
+    asset_root = tmp_path / "assets"
+    (asset_root / "media").mkdir(parents=True)
+    (asset_root / "media" / "chair.png").write_bytes(PNG_BYTES)
+    create_source_db(source)
+    output = approved_path(tmp_path, "reserved-output")
+    run(
+        str(EXPORTER),
+        "--source",
+        str(source),
+        "--output",
+        str(output),
+        "--asset-root",
+        str(asset_root),
+    )
+    target = tmp_path / "target ? # 中文.db"
+    apply_target_schema(target)
+    with sqlite3.connect(target) as connection:
+        connection.executescript((output / "d1-import.sql").read_text())
+    report = approved_path(tmp_path, "reserved-report.json")
+    result = run(
+        str(VERIFIER),
+        "--source",
+        str(source),
+        "--export",
+        str(output),
+        "--target",
+        str(target),
+        "--r2-dir",
+        str(output / "r2"),
+        "--report",
+        str(report),
+        check=False,
+    )
+    assert result.returncode == 0
+    assert json.loads(report.read_text())["ok"] is True
+
+
+@pytest.mark.parametrize(
+    ("table", "statement"),
+    [
+        ("categories", "UPDATE categories SET name = 'Changed' WHERE id = 'cat-1'"),
+        ("sites", "UPDATE sites SET city = 'Changed' WHERE id = 'site-bj'"),
+        ("furniture", "UPDATE furniture SET description = 'Changed' WHERE id = 'fur-1'"),
+        ("furniture_images", "UPDATE furniture_images SET alt_text = 'Changed' WHERE id = 'img-1'"),
+        (
+            "inventory_adjustments",
+            "UPDATE inventory_adjustments SET reason = 'Changed' WHERE id = 'adj-1'",
+        ),
+        ("audit_events", "UPDATE audit_events SET action = 'Changed' WHERE id = 'audit-1'"),
+    ],
+)
+def test_verifier_rejects_equal_count_migrated_record_substitution(
+    tmp_path: Path, table: str, statement: str
+) -> None:
+    """Changing any migrated row without changing counts must fail reconciliation."""
+    source, output, _ = export_fixture(tmp_path)
+    target = tmp_path / "target.db"
+    apply_target_schema(target)
+    with sqlite3.connect(target) as connection:
+        connection.executescript((output / "d1-import.sql").read_text())
+        connection.execute(statement)
+        connection.commit()
+    report = approved_path(tmp_path, f"{table}.json")
+    result = run(
+        str(VERIFIER),
+        "--source",
+        str(source),
+        "--export",
+        str(output),
+        "--target",
+        str(target),
+        "--r2-dir",
+        str(output / "r2"),
+        "--report",
+        str(report),
+        check=False,
+    )
+    assert result.returncode != 0
+    marker = "image" if table == "furniture_images" else table
+    assert any(marker in mismatch for mismatch in json.loads(report.read_text())["mismatches"])
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01",
+        b"GIF89a\x01\x00\x01\x00",
+        b"RIFF\x16\x00\x00\x00WEBPVP8X\x0a\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00",
+    ],
+)
+def test_export_rejects_truncated_or_malformed_image_containers(
+    tmp_path: Path, payload: bytes
+) -> None:
+    """A magic number alone cannot make corrupt image bytes safe to migrate."""
+    source = tmp_path / "source.db"
+    asset_root = tmp_path / "assets"
+    (asset_root / "media").mkdir(parents=True)
+    (asset_root / "media" / "chair.png").write_bytes(payload)
+    create_source_db(source)
+    output = approved_path(tmp_path, "bad-image")
+    result = run(
+        str(EXPORTER),
+        "--source",
+        str(source),
+        "--output",
+        str(output),
+        "--asset-root",
+        str(asset_root),
+        check=False,
+    )
+    assert result.returncode != 0
+    assert not output.exists()

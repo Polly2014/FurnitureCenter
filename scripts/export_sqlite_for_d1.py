@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import math
 import os
@@ -19,6 +20,9 @@ import tempfile
 from collections import Counter, defaultdict
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote, urlsplit
+
+from migration_safety import MigrationSafetyError, require_new_migration_output, sqlite_read_only
+from PIL import Image, UnidentifiedImageError
 
 TABLES = (
     "categories",
@@ -115,16 +119,8 @@ ID_COLUMNS = {
 }
 
 
-class MigrationError(ValueError):
+class MigrationError(MigrationSafetyError):
     """Raised when source data cannot safely be represented by the target."""
-
-
-def sqlite_read_only(path: Path) -> sqlite3.Connection:
-    if not path.is_file():
-        raise MigrationError(f"SQLite source does not exist: {path}")
-    connection = sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)
-    connection.row_factory = sqlite3.Row
-    return connection
 
 
 def atomic_write_bytes(path: Path, payload: bytes) -> None:
@@ -151,19 +147,15 @@ def validate_value(value: object, label: str) -> None:
 
 
 def image_metadata(payload: bytes) -> tuple[str, int, int, str]:
-    if payload.startswith(b"\x89PNG\r\n\x1a\n") and len(payload) >= 24:
-        width = int.from_bytes(payload[16:20], "big")
-        height = int.from_bytes(payload[20:24], "big")
-        mime_type = "image/png"
-    elif payload.startswith(b"\xff\xd8"):
-        mime_type, width, height = jpeg_dimensions(payload)
-    elif payload.startswith((b"GIF87a", b"GIF89a")) and len(payload) >= 10:
-        width = int.from_bytes(payload[6:8], "little")
-        height = int.from_bytes(payload[8:10], "little")
-        mime_type = "image/gif"
-    elif payload.startswith(b"RIFF") and payload[8:12] == b"WEBP":
-        mime_type, width, height = webp_dimensions(payload)
-    else:
+    try:
+        with Image.open(io.BytesIO(payload)) as image:
+            image.verify()
+        with Image.open(io.BytesIO(payload)) as image:
+            mime_type = Image.MIME.get(image.format or "")
+            width, height = image.size
+    except (OSError, SyntaxError, UnidentifiedImageError, ValueError) as error:
+        raise MigrationError("invalid or unsupported image bytes") from error
+    if mime_type not in {"image/png", "image/jpeg", "image/gif", "image/webp"}:
         raise MigrationError("unsupported image bytes; stage PNG, JPEG, GIF, or WebP")
     if width <= 0 or height <= 0:
         raise MigrationError("invalid image dimensions")
@@ -385,6 +377,10 @@ def build_images(
                 "width": width,
                 "height": height,
                 "sha256": digest,
+                "alt_text": row["alt_text"],
+                "sort_order": sort_order,
+                "is_primary": int(bool(row["is_primary"])),
+                "created_at": "1970-01-01T00:00:00Z",
                 "staged_path": f"r2/{object_key}",
                 "_payload": payload,
             }
@@ -414,8 +410,11 @@ def export(
     staging_manifest: Path | None,
     staging_root: Path | None,
 ) -> None:
-    if output.exists():
-        raise MigrationError(f"output directory already exists: {output}")
+    output = require_new_migration_output(
+        output,
+        "migration output",
+        (source, asset_root, *(item for item in (staging_manifest, staging_root) if item)),
+    )
     output.parent.mkdir(parents=True, exist_ok=True)
     with sqlite_read_only(source) as connection:
         records = read_required_tables(connection)
@@ -476,7 +475,7 @@ def main() -> int:
     args = parse_args()
     try:
         export(args.source, args.output, args.asset_root, args.staging_manifest, args.staging_root)
-    except (MigrationError, OSError, sqlite3.Error) as error:
+    except (MigrationSafetyError, OSError, sqlite3.Error) as error:
         print(f"migration export failed: {error}", file=sys.stderr)
         return 1
     return 0
