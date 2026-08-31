@@ -1,9 +1,11 @@
-import { env, SELF } from 'cloudflare:test'
+import { createExecutionContext, createScheduledController, env, SELF, waitOnExecutionContext } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { browserAuth, resetDatabase, seedContractCatalog } from './helpers'
+import worker from '../src/index'
+import { ImageService } from '../src/images/service'
 
 const pngBytes = Uint8Array.from(
-  atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nL8AAAAASUVORK5CYII='),
+  atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg=='),
   (character) => character.charCodeAt(0),
 )
 
@@ -57,7 +59,12 @@ async function uploadAndFinalize(
   }>()
 }
 
-async function signedImagePath(imageId: string, signingKey: string, expires: Date) {
+async function signedImagePath(
+  imageId: string,
+  signingKey: string,
+  expires: Date,
+  variant = 'original',
+) {
   const expiresSeconds = Math.floor(expires.getTime() / 1000)
   const key = await crypto.subtle.importKey(
     'raw',
@@ -69,12 +76,12 @@ async function signedImagePath(imageId: string, signingKey: string, expires: Dat
   const signature = await crypto.subtle.sign(
     'HMAC',
     key,
-    new TextEncoder().encode(`${imageId}.${expiresSeconds}`),
+    new TextEncoder().encode(`${imageId}.${variant}.${expiresSeconds}`),
   )
   let binary = ''
   for (const byte of new Uint8Array(signature)) binary += String.fromCharCode(byte)
   const encoded = btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/u, '')
-  return `/images/${imageId}?expires=${expiresSeconds}&signature=${encoded}`
+  return `/images/${imageId}?variant=${variant}&expires=${expiresSeconds}&signature=${encoded}`
 }
 
 describe('private R2 image management', () => {
@@ -93,6 +100,36 @@ describe('private R2 image management', () => {
     oversized.set(pngBytes)
     const tooLarge = await upload(admin, { body: oversized, contentType: 'image/png' })
     expect(tooLarge.status).toBe(413)
+  })
+
+  it('stops a misleading-length upload as soon as streamed bytes exceed the limit', async () => {
+    const chunkLimit = 4 * 1024 * 1024
+    let pulls = 0
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1
+        if (pulls === 1) controller.enqueue(pngBytes)
+        else if (pulls === 2) controller.enqueue(new Uint8Array(chunkLimit))
+        else return new Promise<void>(() => undefined)
+      },
+    })
+    const request = new Request('https://fc.test/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'image/png', 'Content-Length': '1' },
+      body,
+    })
+
+    const result = await Promise.race([
+      new ImageService(env).upload(
+        'furniture-arc-chair',
+        'token-admin',
+        'streamed-limit-0001',
+        request,
+      ).catch((error: unknown) => error),
+      new Promise<Error>((resolve) => setTimeout(() => resolve(new Error('stream was not stopped')), 50)),
+    ])
+    expect(result).toMatchObject({ status: 413 })
+    expect(pulls).toBeGreaterThanOrEqual(2)
   })
 
   it('uploads with filename-independent keys and replays the same idempotency key', async () => {
@@ -158,6 +195,24 @@ describe('private R2 image management', () => {
     ).toEqual({ count: 0 })
   })
 
+  it('rejects oversized JSON finalization bodies even when Content-Length lies', async () => {
+    const admin = await browserAuth('admin')
+    const uploaded = await upload(admin)
+    const { upload_id: uploadId } = await uploaded.json<{ upload_id: string }>()
+    const body = JSON.stringify({ alt_text: 'x'.repeat(16 * 1024), is_primary: false })
+
+    const response = await SELF.fetch(
+      `https://fc.test/api/admin/furniture/furniture-arc-chair/images/uploads/${uploadId}/finalize`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': '1', ...admin.headers },
+        body,
+      },
+    )
+
+    expect(response.status).toBe(413)
+  })
+
   it('serves authenticated and expiring signed image URLs with byte ranges', async () => {
     const admin = await browserAuth('admin')
     const image = await uploadAndFinalize(admin, {
@@ -195,6 +250,36 @@ describe('private R2 image management', () => {
     )
     const expired = await SELF.fetch(`https://fc.test${expiredPath}`)
     expect(expired.status).toBe(401)
+  })
+
+  it('persists a deterministic private thumbnail and only serves its signed variant', async () => {
+    const admin = await browserAuth('admin')
+    const image = await uploadAndFinalize(admin, { altText: '弧背椅缩略图', primary: true })
+    const row = await env.DB.prepare(
+      `SELECT object_key, mime_type, width, height
+       FROM image_derivatives WHERE image_id = ? AND variant = 'thumbnail'`,
+    )
+      .bind(image.id)
+      .first<{ object_key: string; mime_type: string; width: number; height: number }>()
+    expect(row).toEqual({
+      object_key: `furniture/furniture-arc-chair/${image.id}/thumbnail.webp`,
+      mime_type: 'image/webp',
+      width: 320,
+      height: 320,
+    })
+    expect(await env.IMAGES.head(row!.object_key)).not.toBeNull()
+
+    const unsigned = await SELF.fetch(`https://fc.test/images/${image.id}?variant=thumbnail`)
+    expect(unsigned.status).toBe(401)
+    const signedPath = await signedImagePath(
+      image.id,
+      'test-only-session-signing-key-not-for-production',
+      new Date(Date.now() + 60_000),
+      'thumbnail',
+    )
+    const signed = await SELF.fetch(`https://fc.test${signedPath}`)
+    expect(signed.status).toBe(200)
+    expect(signed.headers.get('content-type')).toBe('image/webp')
   })
 
   it('keeps one primary image, applies ordering and deletes bytes idempotently', async () => {
@@ -255,5 +340,45 @@ describe('private R2 image management', () => {
          WHERE furniture_id = 'furniture-arc-chair' AND is_primary = 1`,
       ).first(),
     ).not.toBeNull()
+  })
+
+  it('retains failed cleanup jobs and retries every original and derivative object on cron', async () => {
+    const objectKeys = ['furniture/cleanup/original', 'furniture/cleanup/thumbnail.webp']
+    await Promise.all(objectKeys.map((objectKey) => env.IMAGES.put(objectKey, pngBytes)))
+    await env.DB.batch(objectKeys.map((objectKey, index) => env.DB.prepare(
+      `INSERT INTO image_cleanup_jobs (id, image_id, object_key)
+       VALUES (?, 'image-cleanup', ?)`,
+    ).bind(`cleanup-${index}`, objectKey)))
+    const scheduled = (worker as unknown as {
+      scheduled: (controller: ScheduledController, cleanupEnv: typeof env, context: ExecutionContext) => Promise<void>
+    }).scheduled
+    const firstContext = createExecutionContext()
+    const unavailableBucket = {
+      ...env,
+      IMAGES: { delete: async () => { throw new Error('R2 unavailable') } },
+    } as unknown as typeof env
+    await scheduled(createScheduledController({ cron: '*/5 * * * *' }), unavailableBucket, firstContext)
+    await waitOnExecutionContext(firstContext)
+    expect(await env.DB.prepare(
+      `SELECT attempts, status, last_error
+       FROM image_cleanup_jobs WHERE id = 'cleanup-0'`,
+    ).first()).toMatchObject({ attempts: 1, status: 'pending', last_error: 'R2 deletion failed' })
+    expect(await env.DB.prepare(
+      `SELECT COUNT(*) AS count FROM audit_events
+       WHERE action = 'cleanup_failed' AND entity_id = 'image-cleanup'`,
+    ).first()).toEqual({ count: 2 })
+
+    const retryContext = createExecutionContext()
+    await scheduled(createScheduledController({ cron: '*/5 * * * *' }), env, retryContext)
+    await waitOnExecutionContext(retryContext)
+    expect(await Promise.all(objectKeys.map((objectKey) => env.IMAGES.head(objectKey)))).toEqual([null, null])
+    expect(await env.DB.prepare(
+      `SELECT status, completed_at, attempts
+       FROM image_cleanup_jobs WHERE id = 'cleanup-0'`,
+    ).first()).toMatchObject({ status: 'completed', attempts: 1 })
+    expect(await env.DB.prepare(
+      `SELECT COUNT(*) AS count FROM audit_events
+       WHERE action = 'cleanup_completed' AND entity_id = 'image-cleanup'`,
+    ).first()).toEqual({ count: 2 })
   })
 })

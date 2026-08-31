@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { CatalogMetadata, Furniture } from '../../types'
@@ -246,5 +246,33 @@ describe('AdminView site inventory management', () => {
     )
     finishUpload?.(true)
     await waitFor(() => expect(within(imageSection).queryByRole('progressbar')).not.toBeInTheDocument())
+  })
+
+  it('accepts a dropped image through an accessible upload drop zone', async () => {
+    const { onUploadImage } = renderAdmin()
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: vi.fn(() => 'blob:dropped-preview'),
+    })
+    await userEvent.setup().click(screen.getByRole('button', { name: '编辑 弧背会议椅' }))
+    const imageSection = screen.getByRole('region', { name: '图片管理' })
+    const dropped = new File(['png'], 'dropped-chair.png', { type: 'image/png' })
+
+    fireEvent.drop(within(imageSection).getByRole('button', { name: '拖放图片到此处或选择图片' }), {
+      dataTransfer: { files: [dropped] },
+    })
+
+    expect(within(imageSection).getByRole('img', { name: '待上传预览' })).toHaveAttribute(
+      'src',
+      'blob:dropped-preview',
+    )
+    expect(within(imageSection).getByLabelText('图片说明')).toHaveValue('弧背会议椅')
+    await userEvent.setup().click(within(imageSection).getByRole('button', { name: '上传并保存' }))
+    expect(onUploadImage).toHaveBeenCalledWith(
+      'furniture-arc-chair',
+      dropped,
+      { alt_text: '弧背会议椅', is_primary: false },
+      expect.any(Function),
+    )
   })
 })

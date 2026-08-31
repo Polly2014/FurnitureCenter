@@ -233,13 +233,14 @@ select, input, textarea { color: var(--ink); }
 .inline-delete-confirm { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; margin-top: 7px; color: #9e392a; font-size: 10px; }
 .inline-delete-confirm button:first-of-type { border-color: #dba99e; color: #9e392a; background: #fff6f4; }
 .image-upload-panel { display: grid; gap: 8px; margin-top: 12px; padding: 11px; border: 1px dashed #cbd4cc; background: #f7f9f6; border-radius: 7px; }
-.image-file-picker { min-height: 36px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid #d4dbd4; background: white; color: var(--blue); border-radius: 5px; font-size: 10px; cursor: pointer; position: relative; overflow: hidden; }
-.image-file-picker input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.image-file-drop-zone { min-height: 72px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px dashed #aebdaf; background: white; color: var(--blue); border-radius: 5px; font-size: 10px; cursor: pointer; }
+.image-file-drop-zone.is-drag-active, .image-file-drop-zone:focus-visible { border-color: var(--blue); background: #eef5f4; outline: 2px solid transparent; }
+.image-file-input { position: absolute; inline-size: 1px; block-size: 1px; opacity: 0; pointer-events: none; }
 .image-upload-preview { position: relative; height: 144px; border: 1px solid #dfe4de; background: white; border-radius: 5px; overflow: hidden; }
 .image-upload-preview img { width: 100%; height: 100%; object-fit: contain; }
 .image-upload-preview button { position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; border: 0; border-radius: 4px; background: rgba(23, 32, 32, .82); color: white; display: grid; place-items: center; }
-.image-upload-panel label:not(.image-file-picker):not(.primary-choice) > span { display: block; margin-bottom: 4px; color: var(--muted); font-size: 9px; }
-.image-upload-panel input[type="text"], .image-upload-panel label:not(.image-file-picker):not(.primary-choice) input { width: 100%; height: 34px; border: 1px solid #d2d8d2; background: white; padding: 6px 8px; font-size: 11px; }
+.image-upload-panel label:not(.primary-choice) > span { display: block; margin-bottom: 4px; color: var(--muted); font-size: 9px; }
+.image-upload-panel input[type="text"], .image-upload-panel label:not(.primary-choice) input { width: 100%; height: 34px; border: 1px solid #d2d8d2; background: white; padding: 6px 8px; font-size: 11px; }
 .primary-choice { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 10px; }
 .image-upload-panel progress { width: 100%; height: 8px; accent-color: var(--blue); }
 .inventory-positions-heading { display: flex; align-items: end; justify-content: space-between; gap: 12px; margin-bottom: 12px; }

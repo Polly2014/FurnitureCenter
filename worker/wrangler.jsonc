@@ -24,16 +24,25 @@
       "bucket_name": "furniture-center-images-local"
     }
   ],
+  "images": {
+    // Native Workers Images transform binding; generated variants are written to private R2.
+    "binding": "IMAGES_TRANSFORM"
+  },
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
   "vars": {
     "ENVIRONMENT": "local"
   },
   "env": {
     "preview": {
       "name": "furniture-center-preview",
+      "images": { "binding": "IMAGES_TRANSFORM" },
       "vars": { "ENVIRONMENT": "preview" }
     },
     "production": {
       "name": "furniture-center",
+      "images": { "binding": "IMAGES_TRANSFORM" },
       "vars": { "ENVIRONMENT": "production" }
     }
   }

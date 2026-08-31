@@ -5,7 +5,12 @@ import { ApplicationError, type FurnitureImage } from '../catalog/models'
 
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024
 const MAX_IMAGE_DIMENSION = 6000
+const MAX_JSON_BYTES = 16 * 1024
 const UPLOAD_TTL_MS = 30 * 60 * 1000
+const THUMBNAIL_VARIANT = 'thumbnail'
+const THUMBNAIL_WIDTH = 320
+const THUMBNAIL_HEIGHT = 320
+const THUMBNAIL_MIME_TYPE = 'image/webp'
 
 type PendingUpload = {
   id: string
@@ -35,6 +40,20 @@ type StoredImage = {
   is_primary: number
 }
 
+type StoredDerivative = {
+  object_key: string
+  mime_type: string
+  byte_size: number
+  width: number
+  height: number
+}
+
+type CleanupJob = {
+  id: string
+  image_id: string
+  object_key: string
+}
+
 export type UploadedImage = {
   upload_id: string
   byte_size: number
@@ -43,6 +62,58 @@ export type UploadedImage = {
   mime_type: string
   sha256: string
   expires_at: string
+}
+
+function bodySizeError(kind: 'image' | 'request') {
+  const maxBytes = kind === 'image' ? MAX_IMAGE_BYTES : MAX_JSON_BYTES
+  return new ApplicationError(413, `${kind} must not exceed ${maxBytes} bytes`)
+}
+
+async function readBoundedStream(
+  stream: ReadableStream<Uint8Array>,
+  maxBytes: number,
+  tooLarge: () => ApplicationError,
+) {
+  const reader = stream.getReader()
+  const chunks: Uint8Array[] = []
+  let byteLength = 0
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      byteLength += value.byteLength
+      if (byteLength > maxBytes) {
+        await reader.cancel()
+        throw tooLarge()
+      }
+      chunks.push(value)
+    }
+  } finally {
+    reader.releaseLock()
+  }
+  const bytes = new Uint8Array(byteLength)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return bytes
+}
+
+async function readLimitedBytes(request: Request, maxBytes: number, kind: 'image' | 'request') {
+  const declaredLength = Number(request.headers.get('Content-Length'))
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) throw bodySizeError(kind)
+  if (!request.body) return new Uint8Array()
+  return readBoundedStream(request.body, maxBytes, () => bodySizeError(kind))
+}
+
+export async function readLimitedJson(request: Request) {
+  const bytes = await readLimitedBytes(request, MAX_JSON_BYTES, 'request')
+  try {
+    return JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>
+  } catch {
+    throw new ApplicationError(422, 'request body must be valid JSON')
+  }
 }
 
 function uploadResponse(row: PendingUpload): UploadedImage {
@@ -142,17 +213,18 @@ export async function createSignedImagePath(
   imageId: string,
   signingKey: string,
   expiresAt: Date,
+  variant = 'original',
 ) {
   const expires = Math.floor(expiresAt.getTime() / 1000)
   const signature = await crypto.subtle.sign(
     'HMAC',
     await hmacKey(signingKey, 'sign'),
-    new TextEncoder().encode(`${imageId}.${expires}`),
+    new TextEncoder().encode(`${imageId}.${variant}.${expires}`),
   )
-  return `/images/${encodeURIComponent(imageId)}?expires=${expires}&signature=${encodeSignature(signature)}`
+  return `/images/${encodeURIComponent(imageId)}?variant=${encodeURIComponent(variant)}&expires=${expires}&signature=${encodeSignature(signature)}`
 }
 
-async function validSignedRequest(request: Request, imageId: string, signingKey: string) {
+async function validSignedRequest(request: Request, imageId: string, variant: string, signingKey: string) {
   const url = new URL(request.url)
   const expires = Number(url.searchParams.get('expires'))
   const signature = url.searchParams.get('signature') ?? ''
@@ -163,7 +235,7 @@ async function validSignedRequest(request: Request, imageId: string, signingKey:
     'HMAC',
     await hmacKey(signingKey, 'verify'),
     signatureBytes,
-    new TextEncoder().encode(`${imageId}.${expires}`),
+    new TextEncoder().encode(`${imageId}.${variant}.${expires}`),
   )
 }
 
@@ -206,15 +278,8 @@ export class ImageService {
     if (!(await this.env.DB.prepare('SELECT 1 FROM furniture WHERE id = ?').bind(furnitureId).first())) {
       throw new ApplicationError(404, `Furniture not found: ${furnitureId}`)
     }
-    const declaredLength = Number(request.headers.get('Content-Length'))
-    if (Number.isFinite(declaredLength) && declaredLength > MAX_IMAGE_BYTES) {
-      throw new ApplicationError(413, `image must not exceed ${MAX_IMAGE_BYTES} bytes`)
-    }
-    const bytes = new Uint8Array(await request.arrayBuffer())
+    const bytes = await readLimitedBytes(request, MAX_IMAGE_BYTES, 'image')
     if (bytes.byteLength === 0) throw new ApplicationError(422, 'image body is required')
-    if (bytes.byteLength > MAX_IMAGE_BYTES) {
-      throw new ApplicationError(413, `image must not exceed ${MAX_IMAGE_BYTES} bytes`)
-    }
     const declaredMimeType = request.headers.get('Content-Type')?.split(';', 1)[0].trim() ?? ''
     const metadata = inspectImage(bytes, declaredMimeType)
     const digest = await sha256Bytes(bytes)
@@ -332,6 +397,7 @@ export class ImageService {
     ) {
       throw new ApplicationError(409, 'uploaded object no longer matches verified image metadata')
     }
+    const thumbnail = await this.createThumbnail(pending)
     const summary = await this.env.DB.prepare(
       `SELECT COUNT(*) AS count, COALESCE(MAX(sort_order), -1) AS max_sort
        FROM furniture_images WHERE furniture_id = ?`,
@@ -369,14 +435,35 @@ export class ImageService {
           sortOrder,
           isPrimary ? 1 : 0,
         ),
+      this.env.DB
+        .prepare(
+          `INSERT INTO image_derivatives
+            (image_id, variant, object_key, mime_type, byte_size, width, height)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          uploadId,
+          THUMBNAIL_VARIANT,
+          thumbnail.objectKey,
+          thumbnail.mimeType,
+          thumbnail.byteSize,
+          THUMBNAIL_WIDTH,
+          THUMBNAIL_HEIGHT,
+        ),
       this.env.DB.prepare('DELETE FROM image_uploads WHERE id = ?').bind(uploadId),
       audit(this.env.DB, 'furniture_image', uploadId, 'finalized', tokenId, {
         furniture_id: furnitureId,
         sha256: pending.sha256,
         is_primary: isPrimary,
+        thumbnail_key: thumbnail.objectKey,
       }),
     )
-    await this.env.DB.batch(statements)
+    try {
+      await this.env.DB.batch(statements)
+    } catch (error) {
+      await this.env.IMAGES.delete(thumbnail.objectKey)
+      throw error
+    }
     return {
       id: uploadId,
       url: `/images/${encodeURIComponent(uploadId)}`,
@@ -444,7 +531,10 @@ export class ImageService {
           .bind(furnitureId, imageId)
           .first<{ id: string }>()
       : null
-    const cleanupId = crypto.randomUUID()
+    const derivatives = await this.env.DB.prepare(
+      'SELECT object_key FROM image_derivatives WHERE image_id = ?',
+    ).bind(imageId).all<{ object_key: string }>()
+    const objectKeys = [image.object_key, ...derivatives.results.map((derivative) => derivative.object_key)]
     const statements: D1PreparedStatement[] = [
       this.env.DB.prepare(
         'DELETE FROM furniture_images WHERE id = ? AND furniture_id = ?',
@@ -457,28 +547,45 @@ export class ImageService {
       )
     }
     statements.push(
-      this.env.DB
+      ...objectKeys.map((objectKey) => this.env.DB
         .prepare(
           `INSERT INTO image_cleanup_jobs (id, image_id, object_key)
            VALUES (?, ?, ?) ON CONFLICT(object_key) DO NOTHING`,
         )
-        .bind(cleanupId, imageId, image.object_key),
+        .bind(crypto.randomUUID(), imageId, objectKey)),
       audit(this.env.DB, 'furniture_image', imageId, 'deleted', actor, {
         furniture_id: furnitureId,
-        object_key: image.object_key,
+        object_keys: objectKeys,
       }),
     )
     await this.env.DB.batch(statements)
-    await this.runCleanup(imageId)
+    await this.runCleanup(imageId, actor)
   }
 
-  async authorizeDelivery(request: Request, imageId: string) {
+  async authorizeDelivery(request: Request, imageId: string, variant: string) {
     if (await authenticateSession(request, this.env)) return true
-    return validSignedRequest(request, imageId, this.env.SESSION_SIGNING_KEY)
+    return validSignedRequest(request, imageId, variant, this.env.SESSION_SIGNING_KEY)
   }
 
   imageById(imageId: string) {
     return this.image(imageId)
+  }
+
+  async imageAssetById(imageId: string, variant: string) {
+    if (variant === 'original') return this.image(imageId)
+    if (variant !== THUMBNAIL_VARIANT) throw new ApplicationError(404, `Image variant not found: ${variant}`)
+    return this.env.DB.prepare(
+      `SELECT object_key, mime_type, byte_size, width, height
+       FROM image_derivatives WHERE image_id = ? AND variant = ?`,
+    ).bind(imageId, variant).first<StoredDerivative>()
+  }
+
+  async retryPendingCleanup() {
+    const jobs = await this.env.DB.prepare(
+      `SELECT DISTINCT image_id FROM image_cleanup_jobs
+       WHERE status = 'pending' ORDER BY created_at LIMIT 100`,
+    ).all<{ image_id: string }>()
+    await Promise.all(jobs.results.map((job) => this.runCleanup(job.image_id, 'system:cron')))
   }
 
   private image(imageId: string, furnitureId?: string) {
@@ -501,23 +608,75 @@ export class ImageService {
     }
   }
 
-  private async runCleanup(imageId: string) {
-    const job = await this.env.DB.prepare(
-      'SELECT id, object_key FROM image_cleanup_jobs WHERE image_id = ? ORDER BY created_at LIMIT 1',
+  private async createThumbnail(pending: PendingUpload) {
+    const original = await this.env.IMAGES.get(pending.object_key)
+    if (!original) throw new ApplicationError(409, 'uploaded object is missing before thumbnail generation')
+    const output = await this.env.IMAGES_TRANSFORM
+      .input(original.body.pipeThrough(new FixedLengthStream(pending.byte_size)))
+      .transform({
+        width: THUMBNAIL_WIDTH,
+        height: THUMBNAIL_HEIGHT,
+        fit: 'cover',
+        gravity: 'center',
+      })
+      .output({ format: THUMBNAIL_MIME_TYPE, quality: 80 })
+    if (output.contentType() !== THUMBNAIL_MIME_TYPE) {
+      throw new ApplicationError(409, 'thumbnail transform returned an unexpected MIME type')
+    }
+    const objectKey = `furniture/${pending.furniture_id}/${pending.id}/${THUMBNAIL_VARIANT}.webp`
+    const bytes = await readBoundedStream(
+      output.image(),
+      MAX_IMAGE_BYTES,
+      () => new ApplicationError(409, 'thumbnail output exceeds the image size limit'),
     )
-      .bind(imageId)
-      .first<{ id: string; object_key: string }>()
-    if (!job) return
-    try {
-      await this.env.IMAGES.delete(job.object_key)
-      await this.env.DB.prepare('DELETE FROM image_cleanup_jobs WHERE id = ?').bind(job.id).run()
-    } catch {
-      await this.env.DB.prepare(
-        `UPDATE image_cleanup_jobs
-         SET attempts = attempts + 1, last_error = 'R2 deletion failed' WHERE id = ?`,
-      )
-        .bind(job.id)
-        .run()
+    await this.env.IMAGES.put(objectKey, bytes, {
+      httpMetadata: { contentType: THUMBNAIL_MIME_TYPE },
+      customMetadata: {
+        source_sha256: pending.sha256,
+        variant: THUMBNAIL_VARIANT,
+        width: String(THUMBNAIL_WIDTH),
+        height: String(THUMBNAIL_HEIGHT),
+      },
+    })
+    const stored = await this.env.IMAGES.head(objectKey)
+    if (!stored || stored.size < 1 || stored.httpMetadata?.contentType !== THUMBNAIL_MIME_TYPE) {
+      throw new ApplicationError(409, 'thumbnail object could not be verified after generation')
+    }
+    return { objectKey, mimeType: THUMBNAIL_MIME_TYPE, byteSize: stored.size }
+  }
+
+  private async runCleanup(imageId: string, actor = 'system') {
+    const jobs = await this.env.DB.prepare(
+      `SELECT id, image_id, object_key FROM image_cleanup_jobs
+       WHERE image_id = ? AND status = 'pending' ORDER BY created_at, id`,
+    ).bind(imageId).all<CleanupJob>()
+    for (const job of jobs.results) {
+      try {
+        await this.env.IMAGES.delete(job.object_key)
+        await this.env.DB.batch([
+          this.env.DB.prepare(
+            `UPDATE image_cleanup_jobs
+             SET status = 'completed', completed_at = CURRENT_TIMESTAMP,
+                 last_attempt_at = CURRENT_TIMESTAMP, last_error = NULL
+             WHERE id = ?`,
+          ).bind(job.id),
+          audit(this.env.DB, 'furniture_image', job.image_id, 'cleanup_completed', actor, {
+            object_key: job.object_key,
+          }),
+        ])
+      } catch {
+        await this.env.DB.batch([
+          this.env.DB.prepare(
+            `UPDATE image_cleanup_jobs
+             SET attempts = attempts + 1, last_error = 'R2 deletion failed',
+                 last_attempt_at = CURRENT_TIMESTAMP WHERE id = ?`,
+          ).bind(job.id),
+          audit(this.env.DB, 'furniture_image', job.image_id, 'cleanup_failed', actor, {
+            object_key: job.object_key,
+            error: 'R2 deletion failed',
+          }),
+        ])
+      }
     }
   }
 }

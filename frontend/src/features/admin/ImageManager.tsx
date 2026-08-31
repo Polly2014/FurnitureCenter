@@ -1,4 +1,4 @@
-import { type ChangeEvent, useEffect, useState } from 'react'
+import { type ChangeEvent, type DragEvent, useEffect, useRef, useState } from 'react'
 import { ArrowDown, ArrowUp, ImagePlus, Star, Trash2, X } from 'lucide-react'
 import type { Furniture, ImageRef, ImageUploadInput } from '../../types'
 
@@ -24,6 +24,8 @@ export function ImageManager({ furniture, onUpload, onReorder, onSetPrimary, onD
   const [progress, setProgress] = useState<number>()
   const [deleteTarget, setDeleteTarget] = useState<string>()
   const [busy, setBusy] = useState(false)
+  const [dragActive, setDragActive] = useState(false)
+  const fileInput = useRef<HTMLInputElement>(null)
 
   useEffect(() => () => {
     if (previewUrl) URL.revokeObjectURL(previewUrl)
@@ -37,14 +39,24 @@ export function ImageManager({ furniture, onUpload, onReorder, onSetPrimary, onD
     setProgress(undefined)
   }
 
-  function chooseFile(event: ChangeEvent<HTMLInputElement>) {
-    const selected = event.target.files?.[0]
+  function chooseFile(selected?: File) {
     if (!selected) return
     setFile(selected)
     setPreviewUrl(URL.createObjectURL(selected))
     setAltText(furniture.name)
     setIsPrimary(images.length === 0)
     setProgress(undefined)
+  }
+
+  function chooseInputFile(event: ChangeEvent<HTMLInputElement>) {
+    chooseFile(event.target.files?.[0])
+    event.target.value = ''
+  }
+
+  function dropFile(event: DragEvent<HTMLButtonElement>) {
+    event.preventDefault()
+    setDragActive(false)
+    chooseFile(event.dataTransfer.files?.[0])
   }
 
   async function move(image: ImageRef, direction: -1 | 1) {
@@ -119,7 +131,19 @@ export function ImageManager({ furniture, onUpload, onReorder, onSetPrimary, onD
         ))}
       </div>
       <div className="image-upload-panel">
-        <label className="image-file-picker"><ImagePlus size={16} /><span>选择图片</span><input type="file" accept="image/png,image/jpeg" aria-label="选择图片" onChange={chooseFile} /></label>
+        <button
+          className={`image-file-drop-zone${dragActive ? ' is-drag-active' : ''}`}
+          type="button"
+          onClick={() => fileInput.current?.click()}
+          onDragEnter={(event) => { event.preventDefault(); setDragActive(true) }}
+          onDragOver={(event) => event.preventDefault()}
+          onDragLeave={() => setDragActive(false)}
+          onDrop={dropFile}
+          aria-label="拖放图片到此处或选择图片"
+        >
+          <ImagePlus size={16} /><span>拖放图片到此处，或选择图片</span>
+        </button>
+        <input ref={fileInput} className="image-file-input" type="file" accept="image/png,image/jpeg" aria-label="选择图片" onChange={chooseInputFile} />
         {previewUrl && <div className="image-upload-preview"><img src={previewUrl} alt="待上传预览" /><button type="button" onClick={clearPendingUpload} aria-label="取消待上传图片"><X size={14} /></button></div>}
         {file && <>
           <label><span>图片说明</span><input value={altText} maxLength={240} onChange={(event) => setAltText(event.target.value)} /></label>

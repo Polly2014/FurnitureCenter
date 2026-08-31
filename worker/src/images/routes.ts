@@ -1,7 +1,7 @@
 import type { Context, Hono } from 'hono'
 import { requireCsrf, requireRole, type AuthEnvironment } from '../auth/middleware'
 import { ApplicationError } from '../catalog/models'
-import { ImageService, parseByteRange } from './service'
+import { ImageService, parseByteRange, readLimitedJson } from './service'
 
 function service(context: Context<AuthEnvironment>) {
   return new ImageService(context.env)
@@ -44,8 +44,7 @@ export function registerImageRoutes(app: Hono<AuthEnvironment>) {
     requireCsrf(),
     async (context) => {
       try {
-        const payload = await context.req.json<Record<string, unknown>>().catch(() => null)
-        if (!payload) throw new ApplicationError(422, 'request body must be valid JSON')
+        const payload = await readLimitedJson(context.req.raw)
         const image = await service(context).finalize(
           context.req.param('furnitureId'),
           context.req.param('uploadId'),
@@ -66,8 +65,7 @@ export function registerImageRoutes(app: Hono<AuthEnvironment>) {
     requireCsrf(),
     async (context) => {
       try {
-        const payload = await context.req.json<Record<string, unknown>>().catch(() => null)
-        if (!payload) throw new ApplicationError(422, 'request body must be valid JSON')
+        const payload = await readLimitedJson(context.req.raw)
         await service(context).reorder(
           context.req.param('furnitureId'),
           payload.image_ids,
@@ -120,10 +118,11 @@ export function registerImageRoutes(app: Hono<AuthEnvironment>) {
     try {
       const imageId = context.req.param('imageId')
       const imageService = service(context)
-      if (!(await imageService.authorizeDelivery(context.req.raw, imageId))) {
+      const variant = context.req.query('variant') ?? 'original'
+      if (!(await imageService.authorizeDelivery(context.req.raw, imageId, variant))) {
         return context.json({ detail: '未认证或图片签名已失效' }, 401)
       }
-      const image = await imageService.imageById(imageId)
+      const image = await imageService.imageAssetById(imageId, variant)
       if (!image) throw new ApplicationError(404, `Image not found: ${imageId}`)
       const range = parseByteRange(context.req.header('Range') ?? null, image.byte_size)
       const object = await context.env.IMAGES.get(

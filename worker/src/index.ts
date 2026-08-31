@@ -4,6 +4,7 @@ import type { AuthEnvironment } from './auth/middleware'
 import { registerCatalogRoutes } from './catalog/routes'
 import type { Env } from './env'
 import { registerImageRoutes } from './images/routes'
+import { ImageService } from './images/service'
 import { registerInventoryRoutes } from './inventory/routes'
 
 const app = new Hono<AuthEnvironment>()
@@ -30,4 +31,9 @@ app.all('/images/*', (context) => context.json({ detail: '图片不存在' }, 40
 app.all('/mcp', (context) => context.json({ detail: 'MCP 端点尚未启用' }, 404))
 app.all('*', (context) => context.env.ASSETS.fetch(context.req.raw))
 
-export default app
+export default {
+  fetch: app.fetch,
+  scheduled(_controller: ScheduledController, env: Env, context: ExecutionContext) {
+    context.waitUntil(new ImageService(env).retryPendingCleanup())
+  },
+}
