@@ -339,27 +339,29 @@ Cloudflare production application:
 - Produces authenticated `/mcp` Streamable HTTP tools `search_furniture`, `get_furniture`, `list_sites`, `list_categories`.
 - Consumes Bearer viewer credentials and Task 6 catalog service.
 
-- [ ] **Step 1: Write failing MCP protocol and authorization tests**
+- [x] **Step 1: Write failing MCP protocol and authorization tests**
 
   Assert discovery/tool schemas, structured content, annotations, missing/invalid/revoked Bearer rejection, bounded search results, short-lived image URLs, and absence of mutation tools.
 
-- [ ] **Step 2: Verify failures before MCP handler registration**
+- [x] **Step 2: Verify failures before MCP handler registration**
 
   Run: `cd worker && npm test -- mcp.test.ts`.
 
-- [ ] **Step 3: Implement stateless Streamable HTTP MCP**
+- [x] **Step 3: Implement stateless Streamable HTTP MCP**
 
   Use Cloudflare's supported MCP handler, explicit Host/Origin validation, Zod input/output schemas, actionable non-secret errors, and shared catalog application services.
 
-- [ ] **Step 4: Add ten stable read-only evaluations**
+- [x] **Step 4: Add ten stable read-only evaluations**
 
   Store independently verifiable questions and answers in `worker/evals/furniture-center.xml`.
 
-- [ ] **Step 5: Verify with tests and two MCP clients**
+- [x] **Step 5: Verify locally with tests and two MCP clients**
 
-  Run the Worker suite, MCP Inspector, and one additional production-compatible MCP host against preview.
+  Run the Worker suite, MCP Inspector, and one additional production-compatible MCP
+  host locally. Repeat both client checks against the deployed preview in Task 11 Step 3;
+  local evidence does not substitute for that deployment gate.
 
-- [ ] **Step 6: Commit MCP**
+- [x] **Step 6: Commit MCP**
 
   Commit: `feat: expose authenticated read-only remote MCP`.
 
