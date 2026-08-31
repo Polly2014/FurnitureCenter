@@ -277,23 +277,23 @@ Cloudflare production application:
 - Produces Admin upload/finalize/reorder/primary/delete endpoints and authenticated/signed `GET /images/:id`.
 - Persists `object_key`, MIME, bytes, dimensions, SHA-256, alt text, sort order and primary flag.
 
-- [ ] **Step 1: Write failing R2 tests**
+- [x] **Step 1: Write failing R2 tests**
 
   Assert viewer cannot upload, MIME/size validation rejects unsafe input, finalize verifies the object, signed URLs expire, primary ordering is stable, and deletion removes metadata plus object idempotently.
 
-- [ ] **Step 2: Verify tests fail before image routes exist**
+- [x] **Step 2: Verify tests fail before image routes exist**
 
   Run: `cd worker && npm test -- images.test.ts`.
 
-- [ ] **Step 3: Implement the R2 service and Admin UI**
+- [x] **Step 3: Implement the R2 service and Admin UI**
 
   Use generated object keys independent of filenames, browser previews, accessible alt text, upload progress and explicit primary-image actions.
 
-- [ ] **Step 4: Verify tests, build, lint and browser upload/lightbox**
+- [x] **Step 4: Verify tests, build, lint and browser upload/lightbox**
 
   Run the Worker image tests and frontend checks, then upload and remove a real small fixture in preview.
 
-- [ ] **Step 5: Commit image management**
+- [x] **Step 5: Commit image management**
 
   Commit: `feat: manage furniture images in private R2`.
 
