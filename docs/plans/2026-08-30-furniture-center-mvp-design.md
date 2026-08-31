@@ -46,7 +46,7 @@ event. Negative quantities are rejected before commit.
    source images. Completed locally with 18 furniture kinds and 307 items.
 3. Master data: category/site administration, image upload and object storage.
 4. Production: Alembic/PostgreSQL, authentication, roles, durable Agent sessions,
-   deployment, observability, and backups for `furniturecenter.polly.wang`.
+   deployment, observability, and backups for `fc.polly.wang`.
 
 ## Validation
 

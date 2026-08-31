@@ -1,6 +1,6 @@
 # FurnitureCenter
 
-Spatial furniture discovery and management for `furniturecenter.polly.wang`.
+Spatial furniture discovery and management for `fc.polly.wang`.
 
 ## Current MVP
 
