@@ -1,0 +1,28 @@
+{
+  "name": "furniture-center-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "npm@11.6.4",
+  "engines": {
+    "node": "^22.0.0 || >=24.0.0",
+    "npm": ">=11.6.4"
+  },
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy:preview": "wrangler deploy --env preview",
+    "deploy:production": "wrangler deploy --env production",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "hono": "^4.13.5"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.22.0",
+    "@cloudflare/workers-types": "^5.20260831.1",
+    "typescript": "~6.0.2",
+    "vitest": "^4.1.11",
+    "wrangler": "^4.127.1"
+  }
+}

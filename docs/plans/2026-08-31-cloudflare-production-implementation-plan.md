@@ -177,23 +177,23 @@ Cloudflare production application:
 - Produces bindings `DB: D1Database`, `IMAGES: R2Bucket`, `ASSETS: Fetcher`, `COPILOTX_API_KEY: string`, `SESSION_SIGNING_KEY: string`.
 - Produces `GET /health` with `{status:"ok", database:"ok"}` after a real D1 query.
 
-- [ ] **Step 1: Write failing Worker health and migration tests**
+- [x] **Step 1: Write failing Worker health and migration tests**
 
   Assert `/health` checks D1 and the migration creates categories, sites, furniture, furniture_images, inventory, inventory_adjustments, audit_events, access_tokens and sessions.
 
-- [ ] **Step 2: Run tests and observe missing Worker failures**
+- [x] **Step 2: Run tests and observe missing Worker failures**
 
   Run: `cd worker && npm test`.
 
-- [ ] **Step 3: Implement minimal Worker and schema**
+- [x] **Step 3: Implement minimal Worker and schema**
 
   Use Hono for routing and Wrangler migrations for all schema creation. Do not seed production from Worker startup.
 
-- [ ] **Step 4: Verify typecheck and Workers tests**
+- [x] **Step 4: Verify typecheck and Workers tests**
 
   Run: `cd worker && npm run typecheck && npm test`.
 
-- [ ] **Step 5: Commit the scaffold**
+- [x] **Step 5: Commit the scaffold**
 
   Commit: `feat: scaffold Cloudflare Worker and D1 schema`.
 
