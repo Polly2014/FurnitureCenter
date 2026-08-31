@@ -3,6 +3,7 @@ import { registerAuthRoutes } from './auth/routes'
 import type { AuthEnvironment } from './auth/middleware'
 import { registerCatalogRoutes } from './catalog/routes'
 import type { Env } from './env'
+import { registerImageRoutes } from './images/routes'
 import { registerInventoryRoutes } from './inventory/routes'
 
 const app = new Hono<AuthEnvironment>()
@@ -10,6 +11,7 @@ const app = new Hono<AuthEnvironment>()
 registerAuthRoutes(app)
 registerCatalogRoutes(app)
 registerInventoryRoutes(app)
+registerImageRoutes(app)
 
 app.get('/health', async (context) => {
   try {

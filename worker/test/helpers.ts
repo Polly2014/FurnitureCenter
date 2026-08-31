@@ -16,6 +16,8 @@ async function sha256(value: string) {
 export async function resetDatabase() {
   await applyD1Migrations(env.DB, env.TEST_MIGRATIONS)
   for (const table of [
+    'image_cleanup_jobs',
+    'image_uploads',
     'idempotency_records',
     'sessions',
     'access_tokens',
@@ -27,7 +29,16 @@ export async function resetDatabase() {
     'sites',
     'categories',
   ]) {
-    await env.DB.prepare(`DELETE FROM ${table}`).run()
+    const exists = await env.DB.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+    )
+      .bind(table)
+      .first()
+    if (exists) await env.DB.prepare(`DELETE FROM ${table}`).run()
+  }
+  const objects = await env.IMAGES.list()
+  if (objects.objects.length > 0) {
+    await env.IMAGES.delete(objects.objects.map((object) => object.key))
   }
 }
 

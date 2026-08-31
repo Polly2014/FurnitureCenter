@@ -5,6 +5,8 @@ import type {
   CreateInventoryPositionInput,
   InventoryAdjustmentInput,
   InventoryTransferInput,
+  ImageRef,
+  ImageUploadInput,
   QueryResult,
 } from './types'
 
@@ -184,6 +186,76 @@ export function updateFurniture(id: string, payload: Record<string, string | num
 
 export function deleteFurniture(id: string) {
   return request<void>(`/api/admin/furniture/${id}`, { method: 'DELETE' })
+}
+
+function uploadImageBytes(
+  furnitureId: string,
+  file: File,
+  onProgress: (percent: number) => void,
+) {
+  return new Promise<{ upload_id: string }>((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', `${API_BASE}/api/admin/furniture/${encodeURIComponent(furnitureId)}/images/uploads`)
+    xhr.withCredentials = true
+    xhr.setRequestHeader('Content-Type', file.type)
+    xhr.setRequestHeader('Idempotency-Key', crypto.randomUUID())
+    const csrfToken = readCookie('fc_csrf')
+    if (csrfToken) xhr.setRequestHeader('X-CSRF-Token', csrfToken)
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && event.total > 0) {
+        onProgress(Math.round((event.loaded / event.total) * 100))
+      }
+    }
+    xhr.onerror = () => reject(new Error('图片上传网络连接失败'))
+    xhr.onload = () => {
+      let payload: { upload_id?: string; detail?: string } | null = null
+      try {
+        payload = JSON.parse(xhr.responseText) as { upload_id?: string; detail?: string }
+      } catch {
+        // Preserve the safe generic error below for malformed upstream responses.
+      }
+      if (xhr.status >= 200 && xhr.status < 300 && payload?.upload_id) {
+        resolve({ upload_id: payload.upload_id })
+      } else {
+        reject(new Error(payload?.detail ?? `图片上传失败 (${xhr.status})`))
+      }
+    }
+    xhr.send(file)
+  })
+}
+
+export async function uploadFurnitureImage(
+  furnitureId: string,
+  file: File,
+  metadata: ImageUploadInput,
+  onProgress: (percent: number) => void,
+) {
+  const uploaded = await uploadImageBytes(furnitureId, file, onProgress)
+  return request<ImageRef>(
+    `/api/admin/furniture/${encodeURIComponent(furnitureId)}/images/uploads/${encodeURIComponent(uploaded.upload_id)}/finalize`,
+    { method: 'POST', body: JSON.stringify(metadata) },
+  )
+}
+
+export function reorderFurnitureImages(furnitureId: string, imageIds: string[]) {
+  return request<void>(`/api/admin/furniture/${encodeURIComponent(furnitureId)}/images/order`, {
+    method: 'PUT',
+    body: JSON.stringify({ image_ids: imageIds }),
+  })
+}
+
+export function setFurniturePrimaryImage(furnitureId: string, imageId: string) {
+  return request<void>(
+    `/api/admin/furniture/${encodeURIComponent(furnitureId)}/images/${encodeURIComponent(imageId)}/primary`,
+    { method: 'POST' },
+  )
+}
+
+export function deleteFurnitureImage(furnitureId: string, imageId: string) {
+  return request<void>(
+    `/api/admin/furniture/${encodeURIComponent(furnitureId)}/images/${encodeURIComponent(imageId)}`,
+    { method: 'DELETE' },
+  )
 }
 
 export function getAgentStatus() {

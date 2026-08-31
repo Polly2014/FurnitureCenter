@@ -24,6 +24,7 @@ vi.mock('./api', () => ({
   createFurniture: vi.fn(),
   createInventoryPosition: vi.fn(),
   deleteFurniture: vi.fn(),
+  deleteFurnitureImage: vi.fn(),
   getAgentStatus: vi.fn().mockResolvedValue({
     mode: 'rules',
     provider: 'Local rules',
@@ -40,9 +41,12 @@ vi.mock('./api', () => ({
     applied_filters: {},
     answer: null,
   }),
+  reorderFurnitureImages: vi.fn(),
+  setFurniturePrimaryImage: vi.fn(),
   streamAgent: vi.fn(),
   transferInventory: vi.fn(),
   updateFurniture: vi.fn(),
+  uploadFurnitureImage: vi.fn(),
 }))
 
 import App from './App'

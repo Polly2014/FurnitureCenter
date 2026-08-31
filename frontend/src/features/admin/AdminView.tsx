@@ -6,7 +6,9 @@ import type {
   Furniture,
   InventoryAdjustmentInput,
   InventoryTransferInput,
+  ImageUploadInput,
 } from '../../types'
+import { ImageManager } from './ImageManager'
 import { InventoryPositions } from './InventoryPositions'
 
 type AdminViewProps = {
@@ -20,6 +22,10 @@ type AdminViewProps = {
     furnitureId: string,
     payload: CreateInventoryPositionInput,
   ) => Promise<boolean>
+  onUploadImage: (furnitureId: string, file: File, metadata: ImageUploadInput, onProgress: (percent: number) => void) => Promise<boolean>
+  onReorderImages: (furnitureId: string, imageIds: string[]) => Promise<boolean>
+  onSetPrimaryImage: (furnitureId: string, imageId: string) => Promise<boolean>
+  onDeleteImage: (furnitureId: string, imageId: string) => Promise<boolean>
 }
 
 export function AdminView({
@@ -30,6 +36,10 @@ export function AdminView({
   onAdjust,
   onTransfer,
   onCreatePosition,
+  onUploadImage,
+  onReorderImages,
+  onSetPrimaryImage,
+  onDeleteImage,
 }: AdminViewProps) {
   const [editingId, setEditingId] = useState<string>()
   const editing = furniture.find((item) => item.id === editingId)
@@ -81,13 +91,22 @@ export function AdminView({
             </div>
           </form>
           {editing && (
-            <InventoryPositions
-              furniture={editing}
-              sites={metadata.sites}
-              onAdjust={onAdjust}
-              onTransfer={onTransfer}
-              onCreatePosition={onCreatePosition}
-            />
+            <>
+              <InventoryPositions
+                furniture={editing}
+                sites={metadata.sites}
+                onAdjust={onAdjust}
+                onTransfer={onTransfer}
+                onCreatePosition={onCreatePosition}
+              />
+              <ImageManager
+                furniture={editing}
+                onUpload={onUploadImage}
+                onReorder={onReorderImages}
+                onSetPrimary={onSetPrimaryImage}
+                onDelete={onDeleteImage}
+              />
+            </>
           )}
         </section>
         <section className="inventory-table-section">

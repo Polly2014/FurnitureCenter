@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { CatalogMetadata, Furniture } from '../../types'
@@ -54,7 +54,11 @@ const chair: Furniture = {
   source_sheet: '',
   source_row: null,
   quantity_available: 16,
-  images: [],
+  images: [
+    { id: 'image-front', url: '/images/image-front', alt_text: '弧背椅正面', is_primary: true },
+    { id: 'image-side', url: '/images/image-side', alt_text: '弧背椅侧面', is_primary: false },
+    { id: 'image-detail', url: '/images/image-detail', alt_text: '弧背椅细节', is_primary: false },
+  ],
   inventory: [
     {
       id: 'inventory-arc-bj',
@@ -77,6 +81,10 @@ function renderAdmin() {
   const onAdjust = vi.fn().mockResolvedValue(true)
   const onTransfer = vi.fn().mockResolvedValue(true)
   const onCreatePosition = vi.fn().mockResolvedValue(true)
+  const onUploadImage = vi.fn().mockResolvedValue(true)
+  const onReorderImages = vi.fn().mockResolvedValue(true)
+  const onSetPrimaryImage = vi.fn().mockResolvedValue(true)
+  const onDeleteImage = vi.fn().mockResolvedValue(true)
   render(
     <AdminView
       metadata={metadata}
@@ -86,9 +94,21 @@ function renderAdmin() {
       onAdjust={onAdjust}
       onTransfer={onTransfer}
       onCreatePosition={onCreatePosition}
+      onUploadImage={onUploadImage}
+      onReorderImages={onReorderImages}
+      onSetPrimaryImage={onSetPrimaryImage}
+      onDeleteImage={onDeleteImage}
     />,
   )
-  return { onAdjust, onTransfer, onCreatePosition }
+  return {
+    onAdjust,
+    onTransfer,
+    onCreatePosition,
+    onUploadImage,
+    onReorderImages,
+    onSetPrimaryImage,
+    onDeleteImage,
+  }
 }
 
 describe('AdminView site inventory management', () => {
@@ -162,5 +182,69 @@ describe('AdminView site inventory management', () => {
       quantity_total: 5,
       quantity_available: 3,
     })
+  })
+
+  it('uploads with local progress and manages primary, order and deletion explicitly', async () => {
+    const user = userEvent.setup()
+    const {
+      onUploadImage,
+      onReorderImages,
+      onSetPrimaryImage,
+      onDeleteImage,
+    } = renderAdmin()
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: vi.fn(() => 'blob:local-preview'),
+    })
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      value: vi.fn(() => undefined),
+    })
+    await user.click(screen.getByRole('button', { name: '编辑 弧背会议椅' }))
+
+    const imageSection = screen.getByRole('region', { name: '图片管理' })
+    expect(within(imageSection).getByText('主图')).toBeInTheDocument()
+    await user.click(within(imageSection).getByRole('button', { name: '后移 弧背椅侧面' }))
+    expect(onReorderImages).toHaveBeenCalledWith('furniture-arc-chair', [
+      'image-front',
+      'image-detail',
+      'image-side',
+    ])
+
+    await user.click(within(imageSection).getByRole('button', { name: '设为主图 弧背椅侧面' }))
+    expect(onSetPrimaryImage).toHaveBeenCalledWith('furniture-arc-chair', 'image-side')
+
+    await user.click(within(imageSection).getByRole('button', { name: '删除 弧背椅侧面' }))
+    expect(within(imageSection).getByText('确认移除这张图片？')).toBeInTheDocument()
+    await user.click(within(imageSection).getByRole('button', { name: '确认删除 弧背椅侧面' }))
+    expect(onDeleteImage).toHaveBeenCalledWith('furniture-arc-chair', 'image-side')
+
+    let finishUpload: ((result: boolean) => void) | undefined
+    onUploadImage.mockImplementation(
+      async (_furnitureId, _file, _metadata, onProgress: (percent: number) => void) => {
+        onProgress(42)
+        return new Promise<boolean>((resolve) => {
+          finishUpload = resolve
+        })
+      },
+    )
+    const file = new File(['png'], 'chair.png', { type: 'image/png' })
+    await user.upload(within(imageSection).getByLabelText('选择图片'), file)
+    expect(within(imageSection).getByRole('img', { name: '待上传预览' })).toHaveAttribute(
+      'src',
+      'blob:local-preview',
+    )
+    const altInput = within(imageSection).getByLabelText('图片说明')
+    expect(altInput).toHaveValue('弧背会议椅')
+    await user.click(within(imageSection).getByRole('button', { name: '上传并保存' }))
+    await waitFor(() => expect(within(imageSection).getByRole('progressbar')).toHaveAttribute('value', '42'))
+    expect(onUploadImage).toHaveBeenCalledWith(
+      'furniture-arc-chair',
+      file,
+      { alt_text: '弧背会议椅', is_primary: false },
+      expect.any(Function),
+    )
+    finishUpload?.(true)
+    await waitFor(() => expect(within(imageSection).queryByRole('progressbar')).not.toBeInTheDocument())
   })
 })

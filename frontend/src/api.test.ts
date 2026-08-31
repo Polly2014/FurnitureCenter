@@ -6,6 +6,7 @@ import {
   login,
   logout,
   transferInventory,
+  uploadFurnitureImage,
 } from './api'
 
 afterEach(() => {
@@ -149,5 +150,74 @@ describe('browser session API', () => {
         headers: expect.objectContaining({ 'x-csrf-token': 'csrf-test-value' }),
       }),
     )
+  })
+})
+
+describe('image administration API', () => {
+  it('uploads image bytes with CSRF, browser credentials and progress before finalizing metadata', async () => {
+    document.cookie = 'fc_csrf=image-csrf-token; Path=/'
+    const fetchMock = stubSuccessfulFetch({
+      id: 'image-new',
+      url: '/images/image-new',
+      alt_text: '弧背会议椅',
+      is_primary: true,
+    })
+    const sent: Array<{ method: string; url: string; headers: Record<string, string>; body: unknown; credentials: boolean }> = []
+
+    class FakeUploadRequest {
+      static last: FakeUploadRequest | undefined
+      method = ''
+      url = ''
+      headers: Record<string, string> = {}
+      responseText = JSON.stringify({ upload_id: 'upload-new' })
+      status = 201
+      withCredentials = false
+      upload = { onprogress: undefined as ((event: ProgressEvent) => void) | undefined }
+      onload: (() => void) | undefined
+      onerror: (() => void) | undefined
+
+      constructor() { FakeUploadRequest.last = this }
+      open(method: string, url: string) { this.method = method; this.url = url }
+      setRequestHeader(name: string, value: string) { this.headers[name.toLowerCase()] = value }
+      send(body: unknown) {
+        sent.push({ method: this.method, url: this.url, headers: this.headers, body, credentials: this.withCredentials })
+        this.upload.onprogress?.({ lengthComputable: true, loaded: 2, total: 4 } as ProgressEvent)
+        this.onload?.()
+      }
+    }
+    vi.stubGlobal('XMLHttpRequest', FakeUploadRequest)
+    const onProgress = vi.fn()
+    const image = new File(['png!'], 'not-the-object-key.png', { type: 'image/png' })
+
+    const created = await uploadFurnitureImage(
+      'furniture-arc-chair',
+      image,
+      { alt_text: '弧背会议椅', is_primary: true },
+      onProgress,
+    )
+
+    expect(sent).toEqual([
+      expect.objectContaining({
+        method: 'POST',
+        url: '/api/admin/furniture/furniture-arc-chair/images/uploads',
+        credentials: true,
+        headers: expect.objectContaining({
+          'content-type': 'image/png',
+          'x-csrf-token': 'image-csrf-token',
+          'idempotency-key': expect.stringMatching(/^[0-9a-f-]{36}$/),
+        }),
+        body: image,
+      }),
+    ])
+    expect(onProgress).toHaveBeenCalledWith(50)
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/admin/furniture/furniture-arc-chair/images/uploads/upload-new/finalize',
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'include',
+        body: JSON.stringify({ alt_text: '弧背会议椅', is_primary: true }),
+      }),
+    )
+    expect(created).toMatchObject({ id: 'image-new', is_primary: true })
   })
 })

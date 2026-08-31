@@ -49,6 +49,11 @@ export type ImageRef = {
   is_primary: boolean
 }
 
+export type ImageUploadInput = {
+  alt_text: string
+  is_primary: boolean
+}
+
 export type Furniture = {
   id: string
   sku: string

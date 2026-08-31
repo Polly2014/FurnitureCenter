@@ -159,7 +159,7 @@ export class D1CatalogRepository {
         `SELECT id, furniture_id, alt_text, is_primary
          FROM furniture_images
          WHERE furniture_id IN (${placeholders(ids.length)})
-         ORDER BY furniture_id, sort_order, id`,
+         ORDER BY furniture_id, is_primary DESC, sort_order, id`,
       )
       .bind(...ids)
     const inventoryBindings: D1Value[] = [...ids]

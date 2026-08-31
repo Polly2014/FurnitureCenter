@@ -15,12 +15,16 @@ import {
   createInventoryPosition,
   createFurniture,
   deleteFurniture,
+  deleteFurnitureImage,
   getAgentStatus,
   getMetadata,
   searchFurniture,
+  reorderFurnitureImages,
+  setFurniturePrimaryImage,
   streamAgent,
   transferInventory,
   updateFurniture,
+  uploadFurnitureImage,
 } from './api'
 import { SpatialMap } from './components/SpatialMap'
 import { ResizeHandle } from './components/ResizeHandle'
@@ -35,6 +39,7 @@ import type {
   CreateInventoryPositionInput,
   InventoryAdjustmentInput,
   InventoryTransferInput,
+  ImageUploadInput,
   QueryResult,
 } from './types'
 
@@ -333,6 +338,59 @@ function FurnitureApp({ session, onLogout }: FurnitureAppProps) {
     }
   }
 
+  async function uploadImage(
+    furnitureId: string,
+    file: File,
+    metadata: ImageUploadInput,
+    onProgress: (percent: number) => void,
+  ) {
+    try {
+      await uploadFurnitureImage(furnitureId, file, metadata, onProgress)
+      setNotice('图片已保存到私有图库')
+      await loadCatalog({ query: '', category: '', site_id: '' })
+      return true
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : '图片上传失败')
+      return false
+    }
+  }
+
+  async function reorderImages(furnitureId: string, imageIds: string[]) {
+    try {
+      await reorderFurnitureImages(furnitureId, imageIds)
+      setNotice('图片顺序已更新')
+      await loadCatalog({ query: '', category: '', site_id: '' })
+      return true
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : '图片排序失败')
+      return false
+    }
+  }
+
+  async function setPrimaryImage(furnitureId: string, imageId: string) {
+    try {
+      await setFurniturePrimaryImage(furnitureId, imageId)
+      setNotice('主图已更新')
+      await loadCatalog({ query: '', category: '', site_id: '' })
+      return true
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : '设置主图失败')
+      return false
+    }
+  }
+
+  async function removeImage(furnitureId: string, imageId: string) {
+    try {
+      await deleteFurnitureImage(furnitureId, imageId)
+      setNotice('图片已移除')
+      await loadCatalog({ query: '', category: '', site_id: '' })
+      return true
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : '删除图片失败')
+      return false
+    }
+  }
+
   function openAdministration() {
     setView('admin')
     setQuery('')
@@ -454,6 +512,10 @@ function FurnitureApp({ session, onLogout }: FurnitureAppProps) {
           onAdjust={changeInventory}
           onTransfer={transferSiteInventory}
           onCreatePosition={addInventoryPosition}
+          onUploadImage={uploadImage}
+          onReorderImages={reorderImages}
+          onSetPrimaryImage={setPrimaryImage}
+          onDeleteImage={removeImage}
         />
       )}
     </div>

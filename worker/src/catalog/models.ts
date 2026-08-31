@@ -1,4 +1,4 @@
-export type RoleAwareStatus = 404 | 409 | 422
+export type RoleAwareStatus = 404 | 409 | 413 | 422
 
 export class ApplicationError extends Error {
   constructor(
