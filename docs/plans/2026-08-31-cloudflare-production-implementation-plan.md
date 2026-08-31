@@ -308,23 +308,23 @@ Cloudflare production application:
 - Produces authenticated `POST /api/agent/query/stream` with `status`, `result`, `text_delta`, `done`, and sanitized `error` events.
 - Consumes `env.COPILOTX_API_KEY` only inside the Worker.
 
-- [ ] **Step 1: Write failing mocked-upstream stream tests**
+- [x] **Step 1: Write failing mocked-upstream stream tests**
 
   Assert catalog result precedes answer deltas, unsupported client model/tools are discarded, upstream errors are sanitized, viewer quota applies, and no key appears in logs or output.
 
-- [ ] **Step 2: Verify the tests fail before the route exists**
+- [x] **Step 2: Verify the tests fail before the route exists**
 
   Run: `cd worker && npm test -- chat.test.ts`.
 
-- [ ] **Step 3: Implement planner, query and grounded answer streaming**
+- [x] **Step 3: Implement planner, query and grounded answer streaming**
 
   Pin the model server-side, validate all planner output, run the shared catalog service, and stream the answer without buffering the full upstream response.
 
-- [ ] **Step 4: Verify automated and browser Chat behavior**
+- [x] **Step 4: Verify automated and browser Chat behavior**
 
   Use a fake upstream in tests and the configured CopilotX Secret only in deployed preview.
 
-- [ ] **Step 5: Commit Chat**
+- [x] **Step 5: Commit Chat**
 
   Commit: `feat: port authenticated result-first chat`.
 
