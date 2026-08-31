@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { registerAuthRoutes } from './auth/routes'
 import type { AuthEnvironment } from './auth/middleware'
 import { registerCatalogRoutes } from './catalog/routes'
+import { registerChatRoutes } from './chat/routes'
 import type { Env } from './env'
 import { registerImageRoutes } from './images/routes'
 import { ImageService } from './images/service'
@@ -11,6 +12,7 @@ const app = new Hono<AuthEnvironment>()
 
 registerAuthRoutes(app)
 registerCatalogRoutes(app)
+registerChatRoutes(app)
 registerInventoryRoutes(app)
 registerImageRoutes(app)
 

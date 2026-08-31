@@ -82,9 +82,14 @@ type AgentStreamHandlers = {
 }
 
 export async function streamAgent(message: string, handlers: AgentStreamHandlers) {
+  const csrfToken = readCookie('fc_csrf')
   const response = await fetch(`${API_BASE}/api/agent/query/stream`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
+    },
     body: JSON.stringify({ message }),
   })
   if (!response.ok) {

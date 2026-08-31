@@ -5,6 +5,7 @@ import {
   getAuthSession,
   login,
   logout,
+  streamAgent,
   transferInventory,
   uploadFurnitureImage,
 } from './api'
@@ -148,6 +149,38 @@ describe('browser session API', () => {
         method: 'POST',
         credentials: 'include',
         headers: expect.objectContaining({ 'x-csrf-token': 'csrf-test-value' }),
+      }),
+    )
+  })
+})
+
+describe('streaming chat API', () => {
+  it('sends only the message with browser credentials and CSRF, then surfaces a sanitized terminal error', async () => {
+    document.cookie = 'fc_csrf=chat-csrf-token; Path=/'
+    const encoder = new TextEncoder()
+    const fetchMock = vi.fn().mockResolvedValue(new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode('event: error\ndata: {"code":"upstream","message":"智能查询暂时不可用，请稍后重试。"}\n\n'))
+        controller.close()
+      },
+    }), { headers: { 'Content-Type': 'text/event-stream' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(streamAgent('北京有哪些会议椅？', {
+      onResult: vi.fn(),
+      onTextDelta: vi.fn(),
+    })).rejects.toThrow('智能查询暂时不可用，请稍后重试。')
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/agent/query/stream',
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'include',
+        headers: expect.objectContaining({
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': 'chat-csrf-token',
+        }),
+        body: JSON.stringify({ message: '北京有哪些会议椅？' }),
       }),
     )
   })
