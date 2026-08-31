@@ -15,7 +15,7 @@ deterministic fixtures, and tests that still match this product.
 ## Product
 
 FurnitureCenter is an internal furniture inventory discovery and management system
-deployed at `furniturecenter.polly.wang`. It manages furniture only.
+deployed at `fc.polly.wang`. It manages furniture only.
 
 The primary experience is a spatial query workspace where users can combine natural
 language questions with structured filters, inspect matching furniture on a map, and
@@ -145,7 +145,7 @@ Keep new modules within these boundaries unless the design document is updated f
 
 - Build this as a new project rather than rewriting FurnitureHub in place.
 - Product scope is furniture only.
-- Target domain is `furniturecenter.polly.wang`.
+- Target domain is `fc.polly.wang`.
 - Natural-language and structured queries coexist.
 - The first administration scope includes furniture, categories, sites, inventory,
   images, inventory adjustment history, and an audit trail.
