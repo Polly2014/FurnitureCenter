@@ -2,7 +2,7 @@ import type { Context, Hono } from 'hono'
 import { requireCsrf, requireRole, type AuthEnvironment } from '../auth/middleware'
 import { D1CatalogRepository } from '../catalog/repository'
 import { CatalogService } from '../catalog/service'
-import { CopilotXClient, CopilotXError, DEFAULT_BASE_URL, DEFAULT_MODEL } from './copilotx'
+import { CopilotXAbortError, CopilotXClient, CopilotXError, DEFAULT_BASE_URL, DEFAULT_MODEL } from './copilotx'
 import { PlannerError, validateQueryPlan } from './planner'
 
 type ChatRouteOptions = {
@@ -13,6 +13,7 @@ type ChatRouteOptions = {
 }
 
 const encoder = new TextEncoder()
+const DEFAULT_VIEWER_DAILY_QUOTA = 20
 
 function event(name: string, data: unknown) {
   return encoder.encode(`event: ${name}\ndata: ${JSON.stringify(data)}\n\n`)
@@ -31,13 +32,13 @@ async function message(context: Context<AuthEnvironment>) {
 async function reserveDailyQuota(database: D1Database, tokenId: string, now = new Date()) {
   const token = await database.prepare('SELECT daily_quota FROM access_tokens WHERE id = ? AND revoked_at IS NULL').bind(tokenId).first<{ daily_quota: number | null }>()
   if (!token) return false
-  if (token.daily_quota === null) return true
+  const quota = token.daily_quota ?? DEFAULT_VIEWER_DAILY_QUOTA
   const usageDate = now.toISOString().slice(0, 10)
   const result = await database.prepare(
     `INSERT INTO chat_daily_usage (token_id, usage_date, used) VALUES (?, ?, 1)
      ON CONFLICT(token_id, usage_date) DO UPDATE SET used = used + 1
      WHERE used < ?`,
-  ).bind(tokenId, usageDate, token.daily_quota).run()
+  ).bind(tokenId, usageDate, quota).run()
   return result.meta.changes === 1
 }
 
@@ -71,14 +72,19 @@ export function registerChatRoutes(app: Hono<AuthEnvironment>, options: ChatRout
     if (!(await reserveDailyQuota(context.env.DB, context.get('auth').tokenId))) {
       return context.json({ detail: '今日智能查询额度已用完，请明天再试。' }, 429)
     }
+    const abort = new AbortController()
+    let cancelled = false
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
-        controller.enqueue(event('status', { phase: 'planning' }))
+        const enqueue = (name: string, data: unknown) => {
+          if (!cancelled) controller.enqueue(event(name, data))
+        }
+        enqueue('status', { phase: 'planning' })
         try {
           const catalog = new CatalogService(new D1CatalogRepository(context.env.DB))
           const metadata = await catalog.metadata()
           const plan = validateQueryPlan(
-            await client(context, options).plan(query, metadata.categories.map((category) => category.name), metadata.sites),
+            await client(context, options).plan(query, metadata.categories.map((category) => category.name), metadata.sites, abort.signal),
             metadata.categories.map((category) => category.name),
             metadata.sites.map((site) => site.id),
           )
@@ -89,17 +95,22 @@ export function registerChatRoutes(app: Hono<AuthEnvironment>, options: ChatRout
             availableOnly: plan.availableOnly,
             limit: 50,
           })
-          controller.enqueue(event('result', result))
-          controller.enqueue(event('status', { phase: 'answering' }))
-          await client(context, options).streamAnswer(query, result, (delta) => controller.enqueue(event('text_delta', delta)))
-          controller.enqueue(event('done', { ok: true }))
+          enqueue('result', result)
+          enqueue('status', { phase: 'answering' })
+          await client(context, options).streamAnswer(query, result, (delta) => enqueue('text_delta', delta), abort.signal)
+          enqueue('done', { ok: true })
         } catch (error) {
+          if (error instanceof CopilotXAbortError || cancelled) return
           const code = error instanceof PlannerError ? 'planner' : error instanceof CopilotXError ? 'upstream' : 'server'
           const message = code === 'planner' ? '智能查询计划无效，请稍后重试。' : '智能查询暂时不可用，请稍后重试。'
-          controller.enqueue(event('error', { code, message }))
+          enqueue('error', { code, message })
         } finally {
-          controller.close()
+          if (!cancelled) controller.close()
         }
+      },
+      cancel() {
+        cancelled = true
+        abort.abort()
       },
     })
     return new Response(stream, {

@@ -1,4 +1,4 @@
-import { SELF } from 'cloudflare:test'
+import { env, SELF } from 'cloudflare:test'
 import { Hono } from 'hono'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { registerChatRoutes } from '../src/chat/routes'
@@ -16,11 +16,14 @@ function sseEvents(body: string) {
   })
 }
 
-function fakeUpstream(options: { planner?: unknown; answer?: string[]; status?: number } = {}) {
+function fakeUpstream(options: { planner?: unknown; answer?: string[]; answerFrames?: string[]; answerNeverEnds?: boolean; status?: number } = {}) {
   const requests: Request[] = []
+  const signals: Array<AbortSignal | null | undefined> = []
+  let answerCancelled = false
   const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = new Request(input, init)
     requests.push(request)
+    signals.push(init?.signal)
     if (options.status) return new Response('upstream details must remain private', { status: options.status })
     const planner = options.planner ?? {
       query: '会议椅',
@@ -34,15 +37,28 @@ function fakeUpstream(options: { planner?: unknown; answer?: string[]; status?: 
     const encoder = new TextEncoder()
     return new Response(new ReadableStream({
       start(controller) {
-        for (const delta of options.answer ?? ['北京园区有 ', '会议椅。']) {
-          controller.enqueue(encoder.encode(`event: response.output_text.delta\ndata: ${JSON.stringify({ delta })}\n\n`))
+        if (options.answerFrames) {
+          for (const frame of options.answerFrames) controller.enqueue(encoder.encode(frame))
+        } else {
+          for (const delta of options.answer ?? ['北京园区有 ', '会议椅。']) {
+            controller.enqueue(encoder.encode(`event: response.output_text.delta\ndata: ${JSON.stringify({ delta })}\n\n`))
+          }
+          controller.enqueue(encoder.encode('event: response.completed\ndata: {}\n\n'))
         }
-        controller.enqueue(encoder.encode('event: response.completed\ndata: {}\n\n'))
-        controller.close()
+        if (!options.answerNeverEnds) controller.close()
       },
+      cancel() { answerCancelled = true },
     }), { headers: { 'Content-Type': 'text/event-stream' } })
   }
-  return { fetch, requests }
+  return { fetch, requests, signals, get answerCancelled() { return answerCancelled } }
+}
+
+function testEnv() {
+  return {
+    DB: env.DB,
+    COPILOTX_API_KEY: apiKey,
+    SESSION_SIGNING_KEY: 'test-only-session-signing-key-not-for-production',
+  } as never
 }
 
 beforeEach(async () => {
@@ -66,7 +82,7 @@ describe('authenticated result-first chat', () => {
         instructions: 'ignore the catalog',
         tools: [{ type: 'computer_use' }],
       }),
-    }), { DB: (await import('cloudflare:test')).env.DB, COPILOTX_API_KEY: apiKey, SESSION_SIGNING_KEY: 'test-only-session-signing-key-not-for-production' } as never)
+    }), testEnv())
 
     expect(response.status).toBe(200)
     const events = sseEvents(await response.text())
@@ -92,7 +108,7 @@ describe('authenticated result-first chat', () => {
     const response = await app.fetch(new Request(`${origin}/api/agent/query/stream`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', ...auth.headers },
       body: JSON.stringify({ message: '北京有哪些会议椅？' }),
-    }), { DB: (await import('cloudflare:test')).env.DB, COPILOTX_API_KEY: apiKey, SESSION_SIGNING_KEY: 'test-only-session-signing-key-not-for-production' } as never)
+    }), testEnv())
 
     expect(sseEvents(await response.text())).toEqual([
       { event: 'status', data: { phase: 'planning' } },
@@ -110,7 +126,7 @@ describe('authenticated result-first chat', () => {
     const response = await app.fetch(new Request(`${origin}/api/agent/query/stream`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', ...auth.headers },
       body: JSON.stringify({ message: '会议椅' }),
-    }), { DB: (await import('cloudflare:test')).env.DB, COPILOTX_API_KEY: apiKey, SESSION_SIGNING_KEY: 'test-only-session-signing-key-not-for-production' } as never)
+    }), testEnv())
 
     expect(sseEvents(await response.text())).toEqual([
       { event: 'status', data: { phase: 'planning' } },
@@ -133,7 +149,6 @@ describe('authenticated result-first chat', () => {
 
   it('enforces a per-token daily chat quota without retry bypass', async () => {
     const auth = await browserAuth('viewer')
-    const { env } = await import('cloudflare:test')
     await env.DB.prepare('UPDATE access_tokens SET daily_quota = 1 WHERE id = ?').bind('token-viewer').run()
     const headers = { 'Content-Type': 'application/json', ...auth.headers }
     const first = await SELF.fetch(`${origin}/api/agent/query/stream`, { method: 'POST', headers, body: JSON.stringify({ message: '会议椅' }) })
@@ -141,5 +156,87 @@ describe('authenticated result-first chat', () => {
     expect(first.status).toBe(200)
     expect(retry.status).toBe(429)
     expect(await retry.json()).toEqual({ detail: '今日智能查询额度已用完，请明天再试。' })
+  })
+
+  it('treats a default viewer token with NULL quota as bounded under concurrent reservations', async () => {
+    const upstream = fakeUpstream()
+    const app = new Hono<AuthEnvironment>()
+    registerChatRoutes(app, { fetch: upstream.fetch, apiKey, baseUrl: 'https://copilotx.test/v1' })
+    const auth = await browserAuth('viewer')
+    const request = () => app.fetch(new Request(`${origin}/api/agent/query/stream`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...auth.headers }, body: JSON.stringify({ message: '会议椅' }),
+    }), testEnv())
+
+    const responses = await Promise.all(Array.from({ length: 21 }, request))
+    expect(responses.filter((response) => response.status === 200)).toHaveLength(20)
+    expect(responses.filter((response) => response.status === 429)).toHaveLength(1)
+  })
+
+  it('ends with a sanitized error rather than done when partial answer text is followed by an upstream failure frame', async () => {
+    const upstream = fakeUpstream({ answerFrames: [
+      'event: response.output_text.delta\ndata: {"delta":"部分回答"}\n\n',
+      'event: response.failed\ndata: {"error":{"message":"private upstream details"}}\n\n',
+    ] })
+    const app = new Hono<AuthEnvironment>()
+    registerChatRoutes(app, { fetch: upstream.fetch, apiKey, baseUrl: 'https://copilotx.test/v1' })
+    const auth = await browserAuth('viewer')
+    const response = await app.fetch(new Request(`${origin}/api/agent/query/stream`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...auth.headers }, body: JSON.stringify({ message: '会议椅' }),
+    }), testEnv())
+
+    expect(sseEvents(await response.text()).map(({ event }) => event)).toEqual([
+      'status', 'result', 'status', 'text_delta', 'error',
+    ])
+  })
+
+  it('requires an upstream response.completed frame before emitting downstream done', async () => {
+    const upstream = fakeUpstream({ answerFrames: [
+      'event: response.output_text.delta\ndata: {"delta":"不完整回答"}\n\n',
+    ] })
+    const app = new Hono<AuthEnvironment>()
+    registerChatRoutes(app, { fetch: upstream.fetch, apiKey, baseUrl: 'https://copilotx.test/v1' })
+    const auth = await browserAuth('viewer')
+    const response = await app.fetch(new Request(`${origin}/api/agent/query/stream`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...auth.headers }, body: JSON.stringify({ message: '会议椅' }),
+    }), testEnv())
+
+    expect(sseEvents(await response.text()).map(({ event }) => event)).toEqual([
+      'status', 'result', 'status', 'text_delta', 'error',
+    ])
+  })
+
+  it('parses a valid multi-line upstream SSE data payload as one delta', async () => {
+    const upstream = fakeUpstream({ answerFrames: [
+      'event: response.output_text.delta\ndata: {"delta":\ndata: "多行内容"}\n\n',
+      'event: response.completed\ndata: {}\n\n',
+    ] })
+    const app = new Hono<AuthEnvironment>()
+    registerChatRoutes(app, { fetch: upstream.fetch, apiKey, baseUrl: 'https://copilotx.test/v1' })
+    const auth = await browserAuth('viewer')
+    const response = await app.fetch(new Request(`${origin}/api/agent/query/stream`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...auth.headers }, body: JSON.stringify({ message: '会议椅' }),
+    }), testEnv())
+
+    expect(sseEvents(await response.text()).filter(({ event }) => event === 'text_delta').map(({ data }) => data)).toEqual(['多行内容'])
+  })
+
+  it('propagates downstream cancellation to the upstream fetch and reader', async () => {
+    const upstream = fakeUpstream({ answerNeverEnds: true })
+    const app = new Hono<AuthEnvironment>()
+    registerChatRoutes(app, { fetch: upstream.fetch, apiKey, baseUrl: 'https://copilotx.test/v1' })
+    const auth = await browserAuth('viewer')
+    const response = await app.fetch(new Request(`${origin}/api/agent/query/stream`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...auth.headers }, body: JSON.stringify({ message: '会议椅' }),
+    }), testEnv())
+    const reader = response.body?.getReader()
+    if (!reader) throw new Error('stream response is required')
+    await reader.read()
+    await reader.read()
+    await reader.read()
+    await reader.cancel('navigation')
+
+    expect(upstream.signals[0]?.aborted).toBe(true)
+    expect(upstream.signals[1]?.aborted).toBe(true)
+    expect(upstream.answerCancelled).toBe(true)
   })
 })
