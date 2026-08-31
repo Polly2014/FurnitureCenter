@@ -14,103 +14,198 @@ const annotations = {
 
 const errorSchema = z.object({
   code: z.enum(['invalid_cursor', 'not_found', 'internal_error']),
-  message: z.string(),
+  message: z.string().max(500),
 }).strict()
 
 const siteSchema = z.object({
-  id: z.string(),
-  code: z.string(),
-  name: z.string(),
-  city: z.string(),
+  id: z.string().max(200),
+  code: z.string().max(50),
+  name: z.string().max(200),
+  city: z.string().max(200),
   latitude: z.number(),
   longitude: z.number(),
 }).strict()
 
-const categorySchema = z.object({ id: z.string(), name: z.string() }).strict()
+const categorySchema = z.object({
+  id: z.string().max(200),
+  name: z.string().max(200),
+}).strict()
 
 const inventorySchema = z.object({
-  site_id: z.string(),
-  site_code: z.string(),
-  site_name: z.string(),
+  site_id: z.string().max(200),
+  site_code: z.string().max(50),
+  site_name: z.string().max(200),
   quantity_total: z.number().int().nonnegative(),
   quantity_available: z.number().int().nonnegative(),
 }).strict()
 
 const imageSchema = z.object({
-  id: z.string(),
-  alt_text: z.string(),
+  id: z.string().max(200),
+  alt_text: z.string().max(1_000),
   is_primary: z.boolean(),
-  url: z.string().url(),
-  expires_at: z.string(),
+  url: z.string().max(2_048).url(),
+  expires_at: z.string().max(32),
 }).strict()
 
 const furnitureSchema = z.object({
-  id: z.string(),
-  sku: z.string(),
-  name: z.string(),
-  name_en: z.string(),
-  category: z.string(),
-  main_category: z.string(),
-  description: z.string(),
-  condition: z.string(),
-  dimensions: z.string(),
-  color: z.string(),
-  material: z.string(),
-  brand: z.string(),
+  id: z.string().max(200),
+  sku: z.string().max(200),
+  name: z.string().max(500),
+  name_en: z.string().max(500),
+  category: z.string().max(200),
+  main_category: z.string().max(500),
+  description: z.string().max(5_000),
+  condition: z.string().max(100),
+  dimensions: z.string().max(500),
+  color: z.string().max(500),
+  material: z.string().max(500),
+  brand: z.string().max(500),
   quantity_available: z.number().int().nonnegative(),
-  images: z.array(imageSchema),
-  inventory: z.array(inventorySchema),
+  images: z.array(imageSchema).max(100),
+  inventory: z.array(inventorySchema).max(100),
 }).strict()
 
-const searchOutputSchema = z.object({
-  ok: z.boolean(),
-  items: z.array(furnitureSchema).optional(),
-  count: z.number().int().nonnegative().optional(),
-  next_cursor: z.string().nullable().optional(),
-  error: errorSchema.optional(),
+const toolErrorOutputSchema = z.object({
+  ok: z.literal(false),
+  error: errorSchema,
 }).strict()
 
-const getOutputSchema = z.object({
-  ok: z.boolean(),
-  item: furnitureSchema.optional(),
-  error: errorSchema.optional(),
+const searchSuccessSchema = z.object({
+  ok: z.literal(true),
+  items: z.array(furnitureSchema).max(50),
+  count: z.number().int().nonnegative().max(50),
+  next_cursor: z.string().max(512).nullable(),
 }).strict()
+const searchOutputSchema = z.discriminatedUnion('ok', [searchSuccessSchema, toolErrorOutputSchema])
 
-const sitesOutputSchema = z.object({
-  ok: z.boolean(),
-  sites: z.array(siteSchema).max(100).optional(),
-  error: errorSchema.optional(),
+const getSuccessSchema = z.object({
+  ok: z.literal(true),
+  item: furnitureSchema,
 }).strict()
+const getOutputSchema = z.discriminatedUnion('ok', [getSuccessSchema, toolErrorOutputSchema])
 
-const categoriesOutputSchema = z.object({
-  ok: z.boolean(),
-  categories: z.array(categorySchema).max(100).optional(),
-  error: errorSchema.optional(),
+const sitesSuccessSchema = z.object({
+  ok: z.literal(true),
+  sites: z.array(siteSchema).max(100),
 }).strict()
+const sitesOutputSchema = z.discriminatedUnion('ok', [sitesSuccessSchema, toolErrorOutputSchema])
 
-function encodeCursor(offset: number) {
-  return btoa(`v1:${offset}`).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/u, '')
+const categoriesSuccessSchema = z.object({
+  ok: z.literal(true),
+  categories: z.array(categorySchema).max(100),
+}).strict()
+const categoriesOutputSchema = z.discriminatedUnion('ok', [categoriesSuccessSchema, toolErrorOutputSchema])
+
+type CursorContext = {
+  query: string | null
+  category: string | null
+  siteId: string | null
+  availableOnly: boolean
+  limit: number
 }
 
-function decodeCursor(cursor: string | undefined) {
+const cursorClaimsSchema = z.object({
+  v: z.literal(1),
+  query: z.string().max(200).nullable(),
+  category: z.string().max(100).nullable(),
+  site_id: z.string().max(100).nullable(),
+  available_only: z.boolean(),
+  limit: z.number().int().min(1).max(50),
+  offset: z.number().int().min(0).max(100_000),
+}).strict()
+
+const cursorEnvelopeSchema = z.object({
+  claims: cursorClaimsSchema,
+  signature: z.string().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/u),
+}).strict()
+
+function encodeBase64Url(bytes: Uint8Array) {
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/u, '')
+}
+
+function decodeBase64Url(value: string) {
+  try {
+    const normalized = value.replaceAll('-', '+').replaceAll('_', '/')
+    const binary = atob(normalized + '='.repeat((4 - normalized.length % 4) % 4))
+    return Uint8Array.from(binary, (character) => character.charCodeAt(0))
+  } catch {
+    return null
+  }
+}
+
+async function cursorKey(signingKey: string, usage: 'sign' | 'verify') {
+  return crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(signingKey),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    [usage],
+  )
+}
+
+function cursorClaims(context: CursorContext, offset: number) {
+  return {
+    v: 1 as const,
+    query: context.query,
+    category: context.category,
+    site_id: context.siteId,
+    available_only: context.availableOnly,
+    limit: context.limit,
+    offset,
+  }
+}
+
+async function encodeCursor(context: CursorContext, offset: number, signingKey: string) {
+  const claims = cursorClaims(context, offset)
+  const signature = await crypto.subtle.sign(
+    'HMAC',
+    await cursorKey(signingKey, 'sign'),
+    new TextEncoder().encode(JSON.stringify(claims)),
+  )
+  return encodeBase64Url(new TextEncoder().encode(JSON.stringify({
+    claims,
+    signature: encodeBase64Url(new Uint8Array(signature)),
+  })))
+}
+
+async function decodeCursor(
+  cursor: string | undefined,
+  context: CursorContext,
+  signingKey: string,
+) {
   if (!cursor) return 0
   try {
-    const normalized = cursor.replaceAll('-', '+').replaceAll('_', '/')
-    const decoded = atob(normalized + '='.repeat((4 - normalized.length % 4) % 4))
-    const match = decoded.match(/^v1:(\d{1,6})$/u)
-    if (!match) return null
-    const offset = Number(match[1])
-    return offset <= 100_000 ? offset : null
+    const envelopeBytes = decodeBase64Url(cursor)
+    if (!envelopeBytes) return null
+    const parsed = cursorEnvelopeSchema.safeParse(
+      JSON.parse(new TextDecoder().decode(envelopeBytes)),
+    )
+    if (!parsed.success) return null
+    const signature = decodeBase64Url(parsed.data.signature)
+    if (!signature) return null
+    const valid = await crypto.subtle.verify(
+      'HMAC',
+      await cursorKey(signingKey, 'verify'),
+      signature,
+      new TextEncoder().encode(JSON.stringify(parsed.data.claims)),
+    )
+    if (!valid) return null
+    const expected = cursorClaims(context, parsed.data.claims.offset)
+    if (JSON.stringify(parsed.data.claims) !== JSON.stringify(expected)) return null
+    return parsed.data.claims.offset
   } catch {
     return null
   }
 }
 
 function errorResult(code: 'invalid_cursor' | 'not_found' | 'internal_error', message: string) {
+  const structuredContent = toolErrorOutputSchema.parse({ ok: false, error: { code, message } })
   return {
     isError: true as const,
     content: [{ type: 'text' as const, text: message }],
-    structuredContent: { ok: false, error: { code, message } },
+    structuredContent,
   }
 }
 
@@ -121,7 +216,7 @@ async function mcpFurniture(
 ) {
   const expires = Math.floor(Date.now() / 1000) + 5 * 60
   const expiresAt = new Date(expires * 1000)
-  return {
+  return furnitureSchema.parse({
     id: item.id,
     sku: item.sku,
     name: item.name,
@@ -152,7 +247,7 @@ async function mcpFurniture(
       quantity_total: position.quantity_total,
       quantity_available: position.quantity_available,
     })),
-  }
+  })
 }
 
 export function createFurnitureMcpServer(env: Env, publicOrigin: string) {
@@ -169,13 +264,20 @@ export function createFurnitureMcpServer(env: Env, publicOrigin: string) {
         site_id: z.string().trim().min(1).max(100).optional(),
         available_only: z.boolean().default(true),
         limit: z.number().int().min(1).max(50).default(20),
-        cursor: z.string().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/u).optional(),
+        cursor: z.string().min(1).max(512).regex(/^[A-Za-z0-9_-]+$/u).optional(),
       }).strict(),
       outputSchema: searchOutputSchema,
       annotations,
     },
     async ({ text, category, site_id: siteId, available_only: availableOnly, limit, cursor }) => {
-      const offset = decodeCursor(cursor)
+      const cursorContext = {
+        query: text ?? null,
+        category: category ?? null,
+        siteId: siteId ?? null,
+        availableOnly,
+        limit,
+      }
+      const offset = await decodeCursor(cursor, cursorContext, env.SESSION_SIGNING_KEY)
       if (offset === null) return errorResult('invalid_cursor', 'The search cursor is invalid or expired.')
       try {
         const result = await catalog.search({
@@ -190,12 +292,14 @@ export function createFurnitureMcpServer(env: Env, publicOrigin: string) {
         const items = await Promise.all(
           result.items.slice(0, limit).map((item) => mcpFurniture(item, publicOrigin, env.SESSION_SIGNING_KEY)),
         )
-        const structuredContent = {
+        const structuredContent = searchSuccessSchema.parse({
           ok: true,
           items,
           count: items.length,
-          next_cursor: hasNext ? encodeCursor(offset + limit) : null,
-        }
+          next_cursor: hasNext
+            ? await encodeCursor(cursorContext, offset + limit, env.SESSION_SIGNING_KEY)
+            : null,
+        })
         return {
           content: [{
             type: 'text' as const,
@@ -223,10 +327,10 @@ export function createFurnitureMcpServer(env: Env, publicOrigin: string) {
       try {
         const item = await catalog.get(furnitureId)
         if (!item) return errorResult('not_found', 'Furniture was not found.')
-        const structuredContent = {
+        const structuredContent = getSuccessSchema.parse({
           ok: true,
           item: await mcpFurniture(item, publicOrigin, env.SESSION_SIGNING_KEY),
-        }
+        })
         return {
           content: [{ type: 'text' as const, text: `Found ${item.name} (${item.sku}).` }],
           structuredContent,
@@ -248,7 +352,10 @@ export function createFurnitureMcpServer(env: Env, publicOrigin: string) {
     async () => {
       try {
         const metadata = await catalog.metadata()
-        const structuredContent = { ok: true, sites: metadata.sites.slice(0, 100) }
+        const structuredContent = sitesSuccessSchema.parse({
+          ok: true,
+          sites: metadata.sites.slice(0, 100),
+        })
         return {
           content: [{ type: 'text' as const, text: `${structuredContent.sites.length} sites are registered.` }],
           structuredContent,
@@ -270,7 +377,10 @@ export function createFurnitureMcpServer(env: Env, publicOrigin: string) {
     async () => {
       try {
         const metadata = await catalog.metadata()
-        const structuredContent = { ok: true, categories: metadata.categories.slice(0, 100) }
+        const structuredContent = categoriesSuccessSchema.parse({
+          ok: true,
+          categories: metadata.categories.slice(0, 100),
+        })
         return {
           content: [{ type: 'text' as const, text: `${structuredContent.categories.length} categories are registered.` }],
           structuredContent,

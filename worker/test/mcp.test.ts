@@ -1,7 +1,7 @@
 import { env, SELF } from 'cloudflare:test'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { Hono } from 'hono'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AuthEnvironment } from '../src/auth/middleware'
 import type { Env } from '../src/env'
 import { registerMcpRoutes } from '../src/mcp/routes'
@@ -80,6 +80,54 @@ async function rpc(
   return { response, body: JSON.parse(text) as RpcResponse }
 }
 
+function localMcpApp() {
+  const app = new Hono<AuthEnvironment>()
+  registerMcpRoutes(app)
+  return app
+}
+
+function localBindings() {
+  return {
+    ...env,
+    SESSION_SIGNING_KEY: 'test-only-session-signing-key-not-for-production',
+    ENVIRONMENT: 'local',
+  } as Env
+}
+
+function streamedMcpRequest(
+  body: ReadableStream<Uint8Array>,
+  headers: Record<string, string> = {},
+) {
+  return new Request('http://localhost/mcp', {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json, text/event-stream',
+      Authorization: `Bearer ${viewerToken}`,
+      'Content-Type': 'application/json',
+      Host: 'localhost',
+      ...headers,
+    },
+    body,
+  })
+}
+
+function oversizedHangingBody() {
+  let pulls = 0
+  let cancelled = false
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      pulls += 1
+      if (pulls === 1) controller.enqueue(new Uint8Array(32 * 1024))
+      else if (pulls === 2) controller.enqueue(new Uint8Array(32 * 1024 + 1))
+      else return new Promise<void>(() => undefined)
+    },
+    cancel() {
+      cancelled = true
+    },
+  })
+  return { stream, wasCancelled: () => cancelled }
+}
+
 function toolResult(body: RpcResponse) {
   expect(body.error).toBeUndefined()
   return body.result as {
@@ -89,10 +137,21 @@ function toolResult(body: RpcResponse) {
   }
 }
 
+function schemaNodes(value: unknown): Array<Record<string, unknown>> {
+  if (!value || typeof value !== 'object') return []
+  if (Array.isArray(value)) return value.flatMap(schemaNodes)
+  const record = value as Record<string, unknown>
+  return [record, ...Object.values(record).flatMap(schemaNodes)]
+}
+
 beforeEach(async () => {
   await resetDatabase()
   await seedContractCatalog()
   await issueViewerToken()
+})
+
+afterEach(() => {
+  vi.useRealTimers()
 })
 
 describe('authenticated stateless MCP transport', () => {
@@ -153,7 +212,7 @@ describe('authenticated stateless MCP transport', () => {
         expect(tool.description).toEqual(expect.any(String))
         expect(String(tool.description).length).toBeGreaterThan(20)
         expect(tool.inputSchema).toMatchObject({ type: 'object', additionalProperties: false })
-        expect(tool.outputSchema).toMatchObject({ type: 'object', additionalProperties: false })
+        expect(tool.outputSchema).toMatchObject({ type: 'object' })
         expect(tool.annotations).toEqual({
           readOnlyHint: true,
           destructiveHint: false,
@@ -246,6 +305,44 @@ describe('authenticated stateless MCP transport', () => {
       bindings('production', 'attacker.example'),
     )).status).toBe(403)
   })
+
+  it('rejects oversized bodies without relying on Content-Length', async () => {
+    const response = await localMcpApp().fetch(
+      streamedMcpRequest(new ReadableStream({
+        start(controller) {
+          controller.enqueue(new Uint8Array(64 * 1024 + 1))
+          controller.close()
+        },
+      })),
+      localBindings(),
+    )
+    expect(response.status).toBe(400)
+  })
+
+  it('cancels a forged-length body immediately when streamed bytes exceed 64 KiB', async () => {
+    const body = oversizedHangingBody()
+    const result = await Promise.race([
+      localMcpApp().fetch(
+        streamedMcpRequest(body.stream, { 'Content-Length': '1' }),
+        localBindings(),
+      ),
+      new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 100)),
+    ])
+    expect(result).not.toBe('timeout')
+    expect((result as Response).status).toBe(400)
+    expect(body.wasCancelled()).toBe(true)
+  })
+
+  it('cancels an oversized chunked body with no Content-Length', async () => {
+    const body = oversizedHangingBody()
+    const result = await Promise.race([
+      localMcpApp().fetch(streamedMcpRequest(body.stream), localBindings()),
+      new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 100)),
+    ])
+    expect(result).not.toBe('timeout')
+    expect((result as Response).status).toBe(400)
+    expect(body.wasCancelled()).toBe(true)
+  })
 })
 
 describe('read-only furniture tools', () => {
@@ -273,7 +370,216 @@ describe('read-only furniture tools', () => {
     expect(invalidResult.content[0]?.text).toContain('limit')
   })
 
+  it('requires availability at the selected site rather than at another site', async () => {
+    await env.DB.prepare(
+      `INSERT INTO inventory
+        (id, furniture_id, site_id, quantity_total, quantity_available, version)
+       VALUES ('inventory-oak-bj-empty', 'furniture-oak-table', 'site-beijing', 2, 0, 1)`,
+    ).run()
+
+    const available = toolResult((await rpc('tools/call', {
+      name: 'search_furniture',
+      arguments: { site_id: 'site-beijing', available_only: true, limit: 20 },
+    })).body)
+    expect((available.structuredContent.items as Array<{ id: string }>).map((item) => item.id)).toEqual([
+      'furniture-shelf',
+      'furniture-arc-chair',
+    ])
+
+    const includingUnavailable = toolResult((await rpc('tools/call', {
+      name: 'search_furniture',
+      arguments: { site_id: 'site-beijing', available_only: false, limit: 20 },
+    })).body)
+    expect((includingUnavailable.structuredContent.items as Array<{ id: string }>).map((item) => item.id)).toEqual([
+      'furniture-shelf',
+      'furniture-arc-chair',
+      'furniture-oak-table',
+    ])
+  })
+
+  it('signs cursors and binds them to normalized filters and page size', async () => {
+    const first = toolResult((await rpc('tools/call', {
+      name: 'search_furniture',
+      arguments: { text: '  木质  ', available_only: true, limit: 1 },
+    })).body)
+    expect(first.structuredContent).toMatchObject({
+      ok: true,
+      items: [{ id: 'furniture-shelf' }],
+      next_cursor: expect.stringMatching(/^[A-Za-z0-9_-]+$/u),
+    })
+    const cursor = first.structuredContent.next_cursor as string
+
+    const second = toolResult((await rpc('tools/call', {
+      name: 'search_furniture',
+      arguments: { text: '木质', available_only: true, limit: 1, cursor },
+    })).body)
+    expect(second.structuredContent).toMatchObject({
+      ok: true,
+      items: [{ id: 'furniture-oak-table' }],
+      next_cursor: null,
+    })
+
+    const replacement = cursor.endsWith('A') ? 'B' : 'A'
+    const tampered = toolResult((await rpc('tools/call', {
+      name: 'search_furniture',
+      arguments: { text: '木质', available_only: true, limit: 1, cursor: cursor.slice(0, -1) + replacement },
+    })).body)
+    expect(tampered).toMatchObject({
+      isError: true,
+      structuredContent: { ok: false, error: { code: 'invalid_cursor' } },
+    })
+
+    const filterMismatch = toolResult((await rpc('tools/call', {
+      name: 'search_furniture',
+      arguments: { text: '木质', site_id: 'site-shanghai', available_only: true, limit: 1, cursor },
+    })).body)
+    expect(filterMismatch).toMatchObject({
+      isError: true,
+      structuredContent: { ok: false, error: { code: 'invalid_cursor' } },
+    })
+
+    const limitMismatch = toolResult((await rpc('tools/call', {
+      name: 'search_furniture',
+      arguments: { text: '木质', available_only: true, limit: 2, cursor },
+    })).body)
+    expect(limitMismatch).toMatchObject({
+      isError: true,
+      structuredContent: { ok: false, error: { code: 'invalid_cursor' } },
+    })
+  })
+
+  it('publishes bounded discriminated output contracts for every tool', async () => {
+    const listed = await rpc('tools/list')
+    const tools = (listed.body.result?.tools ?? []) as Array<{ name: string; outputSchema: unknown }>
+    expect(tools).toHaveLength(4)
+    for (const tool of tools) {
+      const nodes = schemaNodes(tool.outputSchema)
+      const externalStrings = nodes.filter((node) => node.type === 'string' && !Array.isArray(node.enum))
+      const arrays = nodes.filter((node) => node.type === 'array')
+      expect(externalStrings.length, `${tool.name} string schemas`).toBeGreaterThan(0)
+      expect(arrays.length, `${tool.name} array schemas`).toBeGreaterThan(0)
+      expect(externalStrings.every((node) => Number.isInteger(node.maxLength)), tool.name).toBe(true)
+      expect(arrays.every((node) => Number.isInteger(node.maxItems)), tool.name).toBe(true)
+
+      const success = nodes.find((node) => {
+        const properties = node.properties as Record<string, Record<string, unknown>> | undefined
+        return properties?.ok?.const === true
+      })
+      const failure = nodes.find((node) => {
+        const properties = node.properties as Record<string, Record<string, unknown>> | undefined
+        return properties?.ok?.const === false
+      })
+      expect(success, `${tool.name} success branch`).toBeDefined()
+      expect(failure, `${tool.name} failure branch`).toMatchObject({
+        additionalProperties: false,
+        required: expect.arrayContaining(['ok', 'error']),
+      })
+    }
+  })
+
+  it('fails closed when an external furniture string exceeds the output contract', async () => {
+    await env.DB.prepare("UPDATE furniture SET description = ? WHERE id = 'furniture-arc-chair'")
+      .bind('x'.repeat(5_001))
+      .run()
+    const result = toolResult((await rpc('tools/call', {
+      name: 'get_furniture', arguments: { furniture_id: 'furniture-arc-chair' },
+    })).body)
+    expect(result).toMatchObject({
+      isError: true,
+      structuredContent: { ok: false, error: { code: 'internal_error' } },
+    })
+    expect(JSON.stringify(result)).not.toContain('x'.repeat(1_000))
+  })
+
+  it('fails closed when an external result array exceeds the output contract', async () => {
+    await env.DB.batch(Array.from({ length: 100 }, (_, index) => env.DB.prepare(
+      `INSERT INTO furniture_images
+        (id, furniture_id, object_key, mime_type, byte_size, width, height, sha256,
+         alt_text, sort_order, is_primary)
+       VALUES (?, 'furniture-arc-chair', ?, 'image/jpeg', 1, 1, 1, ?, ?, ?, 0)`,
+    ).bind(
+      `image-overflow-${index.toString().padStart(3, '0')}`,
+      `fixtures/overflow-${index.toString().padStart(3, '0')}.jpg`,
+      `overflow-${index}`,
+      `overflow ${index}`,
+      index + 1,
+    )))
+    const result = toolResult((await rpc('tools/call', {
+      name: 'get_furniture', arguments: { furniture_id: 'furniture-arc-chair' },
+    })).body)
+    expect(result).toMatchObject({
+      isError: true,
+      structuredContent: { ok: false, error: { code: 'internal_error' } },
+    })
+  })
+
+  it('uses unique ID tie-breakers for furniture pages and metadata', async () => {
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO furniture (id, sku, name, category_id, condition)
+         VALUES ('furniture-equal-z', 'EQ-Z', '同名家具', 'category-seating', 'good')`,
+      ),
+      env.DB.prepare(
+        `INSERT INTO furniture (id, sku, name, category_id, condition)
+         VALUES ('furniture-equal-a', 'EQ-A', '同名家具', 'category-seating', 'good')`,
+      ),
+      env.DB.prepare(
+        `INSERT INTO inventory
+          (id, furniture_id, site_id, quantity_total, quantity_available, version)
+         VALUES ('inventory-equal-z', 'furniture-equal-z', 'site-beijing', 1, 1, 1)`,
+      ),
+      env.DB.prepare(
+        `INSERT INTO inventory
+          (id, furniture_id, site_id, quantity_total, quantity_available, version)
+         VALUES ('inventory-equal-a', 'furniture-equal-a', 'site-beijing', 1, 1, 1)`,
+      ),
+      env.DB.prepare(
+        `INSERT INTO sites (id, code, name, city, latitude, longitude)
+         VALUES ('site-equal-z', 'EZ', '同名园区', '测试', 1, 1)`,
+      ),
+      env.DB.prepare(
+        `INSERT INTO sites (id, code, name, city, latitude, longitude)
+         VALUES ('site-equal-a', 'EA', '同名园区', '测试', 1, 1)`,
+      ),
+    ])
+
+    const first = toolResult((await rpc('tools/call', {
+      name: 'search_furniture',
+      arguments: { text: '同名家具', available_only: false, limit: 1 },
+    })).body)
+    expect(first.structuredContent).toMatchObject({
+      items: [{ id: 'furniture-equal-a' }],
+      next_cursor: expect.any(String),
+    })
+    const second = toolResult((await rpc('tools/call', {
+      name: 'search_furniture',
+      arguments: {
+        text: '同名家具',
+        available_only: false,
+        limit: 1,
+        cursor: first.structuredContent.next_cursor,
+      },
+    })).body)
+    expect(second.structuredContent).toMatchObject({
+      items: [{ id: 'furniture-equal-z' }],
+      next_cursor: null,
+    })
+
+    const sites = toolResult((await rpc('tools/call', {
+      name: 'list_sites', arguments: {},
+    })).body)
+    expect((sites.structuredContent.sites as Array<{ id: string; name: string }>)
+      .filter((site) => site.name === '同名园区')
+      .map((site) => site.id)).toEqual(['site-equal-a', 'site-equal-z'])
+  })
+
   it('gets one furniture item with short-lived signed Worker image URLs', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-01T00:00:00.000Z'))
+    const imageBytes = new Uint8Array(1_024).fill(7)
+    await env.IMAGES.put('fixtures/arc-chair.jpg', imageBytes, {
+      httpMetadata: { contentType: 'image/jpeg' },
+    })
     const before = Math.floor(Date.now() / 1000)
     const { body } = await rpc('tools/call', {
       name: 'get_furniture',
@@ -303,6 +609,14 @@ describe('read-only furniture tools', () => {
     expect(expiry).toBeLessThanOrEqual(before + 5 * 60)
     expect(Date.parse(item.images[0].expires_at) / 1000).toBe(expiry)
     expect(JSON.stringify(result)).not.toContain('fixtures/arc-chair.jpg')
+
+    const delivered = await SELF.fetch(imageUrl.toString())
+    expect(delivered.status).toBe(200)
+    expect(new Uint8Array(await delivered.arrayBuffer())).toEqual(imageBytes)
+
+    vi.setSystemTime(new Date((expiry + 1) * 1_000))
+    const expired = await SELF.fetch(imageUrl.toString())
+    expect(expired.status).toBe(401)
   })
 
   it('returns stable bounded site and category metadata', async () => {

@@ -121,11 +121,11 @@ export class D1CatalogRepository {
         `EXISTS (
           SELECT 1 FROM inventory site_inventory
           WHERE site_inventory.furniture_id = f.id AND site_inventory.site_id = ?
+            ${filters.availableOnly ? 'AND site_inventory.quantity_available > 0' : ''}
         )`,
       )
       bindings.push(filters.siteId)
-    }
-    if (filters.availableOnly) {
+    } else if (filters.availableOnly) {
       where.push(
         `EXISTS (
           SELECT 1 FROM inventory available_inventory
@@ -144,7 +144,7 @@ export class D1CatalogRepository {
          FROM furniture f
          JOIN categories c ON c.id = f.category_id
          ${whereClause}
-         ORDER BY f.name
+         ORDER BY f.name, f.id
          LIMIT ? OFFSET ?`,
       )
       .bind(...bindings, limit, offset)
@@ -241,9 +241,9 @@ export class D1CatalogRepository {
 
   async metadata(): Promise<{ categories: Category[]; sites: Site[] }> {
     const [categories, sites] = await this.database.batch<Category | Site>([
-      this.database.prepare('SELECT id, name FROM categories ORDER BY name'),
+      this.database.prepare('SELECT id, name FROM categories ORDER BY name, id'),
       this.database.prepare(
-        'SELECT id, code, name, city, latitude, longitude FROM sites ORDER BY name',
+        'SELECT id, code, name, city, latitude, longitude FROM sites ORDER BY name, id',
       ),
     ])
     return {

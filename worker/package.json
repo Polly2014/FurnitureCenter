@@ -14,6 +14,7 @@
     "deploy:production": "wrangler deploy --env production",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:mcp-eval-agent": "node --test scripts/furniture-eval-agent.node.mjs",
     "verify:mcp-evals": "node scripts/verify-mcp-evals.mjs",
     "verify:mcp-client": "node scripts/verify-mcp-client.mjs"
   },

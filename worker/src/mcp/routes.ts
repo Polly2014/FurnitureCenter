@@ -57,12 +57,35 @@ function validateRequestSource(request: Request, env: Env) {
 
 async function readBody(request: Request) {
   if (request.headers.get('Content-Type')?.split(';', 1)[0].trim() !== 'application/json') return null
-  const declared = Number(request.headers.get('Content-Length'))
-  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return null
-  const text = await request.text()
-  if (new TextEncoder().encode(text).byteLength > MAX_BODY_BYTES) return null
+  const contentLength = request.headers.get('Content-Length')
+  const declared = contentLength === null ? null : Number(contentLength)
+  if (declared !== null && Number.isFinite(declared) && declared > MAX_BODY_BYTES) return null
+  if (!request.body) return null
+  const reader = request.body.getReader()
+  const chunks: Uint8Array[] = []
+  let byteLength = 0
   try {
-    return JSON.parse(text) as unknown
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      byteLength += value.byteLength
+      if (byteLength > MAX_BODY_BYTES) {
+        await reader.cancel()
+        return null
+      }
+      chunks.push(value)
+    }
+  } finally {
+    reader.releaseLock()
+  }
+  const bytes = new Uint8Array(byteLength)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  try {
+    return JSON.parse(new TextDecoder().decode(bytes)) as unknown
   } catch {
     return null
   }
