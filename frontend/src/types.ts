@@ -17,6 +17,29 @@ export type InventoryPosition = {
   site: Site
   quantity_total: number
   quantity_available: number
+  version: number
+}
+
+export type InventoryAdjustmentInput = {
+  kind: string
+  delta_total: number
+  delta_available: number
+  reason: string
+  expected_version: number
+}
+
+export type InventoryTransferInput = {
+  destination_site_id: string
+  quantity: number
+  reason: string
+  expected_source_version: number
+  expected_destination_version: number | null
+}
+
+export type CreateInventoryPositionInput = {
+  site_id: string
+  quantity_total: number
+  quantity_available: number
 }
 
 export type ImageRef = {

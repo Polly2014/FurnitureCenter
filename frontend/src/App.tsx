@@ -11,12 +11,14 @@ import {
 import './App.css'
 import {
   adjustInventory,
+  createInventoryPosition,
   createFurniture,
   deleteFurniture,
   getAgentStatus,
   getMetadata,
   searchFurniture,
   streamAgent,
+  transferInventory,
   updateFurniture,
 } from './api'
 import { SpatialMap } from './components/SpatialMap'
@@ -24,7 +26,14 @@ import { ResizeHandle } from './components/ResizeHandle'
 import { AdminView } from './features/admin/AdminView'
 import { FurnitureDetail } from './features/gallery/FurnitureDetail'
 import { ChatWorkspace, type ChatMessage } from './features/query/ChatWorkspace'
-import type { AgentStatus, CatalogMetadata, QueryResult } from './types'
+import type {
+  AgentStatus,
+  CatalogMetadata,
+  CreateInventoryPositionInput,
+  InventoryAdjustmentInput,
+  InventoryTransferInput,
+  QueryResult,
+} from './types'
 
 const emptyResult: QueryResult = {
   items: [],
@@ -271,13 +280,48 @@ function App() {
     }
   }
 
-  async function changeInventory(inventoryId: string, delta: number) {
+  async function changeInventory(
+    inventoryId: string,
+    payload: InventoryAdjustmentInput,
+  ) {
     try {
-      await adjustInventory(inventoryId, delta, delta > 0 ? '管理界面入库' : '管理界面盘点扣减')
-      setNotice(delta > 0 ? '库存已增加' : '库存已扣减')
+      await adjustInventory(inventoryId, payload)
+      setNotice('园区库存已调整')
       await loadCatalog({ query: '', category: '', site_id: '' })
+      return true
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : '库存调整失败')
+      return false
+    }
+  }
+
+  async function transferSiteInventory(
+    inventoryId: string,
+    payload: InventoryTransferInput,
+  ) {
+    try {
+      await transferInventory(inventoryId, payload)
+      setNotice('园区库存已完成调拨')
+      await loadCatalog({ query: '', category: '', site_id: '' })
+      return true
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : '库存调拨失败')
+      return false
+    }
+  }
+
+  async function addInventoryPosition(
+    furnitureId: string,
+    payload: CreateInventoryPositionInput,
+  ) {
+    try {
+      await createInventoryPosition(furnitureId, payload)
+      setNotice('园区库存已添加')
+      await loadCatalog({ query: '', category: '', site_id: '' })
+      return true
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : '添加园区库存失败')
+      return false
     }
   }
 
@@ -388,7 +432,15 @@ function App() {
           </section>
         </main>
       ) : (
-        <AdminView metadata={metadata} furniture={result.items} onSave={saveFurniture} onDelete={removeFurniture} onAdjust={(id, delta) => void changeInventory(id, delta)} />
+        <AdminView
+          metadata={metadata}
+          furniture={result.items}
+          onSave={saveFurniture}
+          onDelete={removeFurniture}
+          onAdjust={changeInventory}
+          onTransfer={transferSiteInventory}
+          onCreatePosition={addInventoryPosition}
+        />
       )}
     </div>
   )

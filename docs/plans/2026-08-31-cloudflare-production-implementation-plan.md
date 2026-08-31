@@ -134,29 +134,34 @@ Cloudflare production application:
 - Modify: `frontend/src/api.ts`
 - Modify: `frontend/src/types.ts`
 - Modify: `frontend/src/App.css`
-- Modify: `tests/test_frontend_presentation.py`
+- Create: `frontend/src/features/admin/AdminView.test.tsx`
+- Create: `frontend/src/api.test.ts`
 
 **Interfaces:**
 - Consumes: Task 2 endpoints and inventory `version`.
 - Produces: explicit site rows with `available / total`, adjustment-type dialog, add-site flow, and atomic transfer flow.
 
-- [ ] **Step 1: Write a failing presentation contract test**
+- [x] **Step 1: Write failing component and API contract tests**
 
-  Assert `AdminView.tsx` no longer contains `item.inventory[0]`; assert `InventoryPositions.tsx` renders every position and sends the selected position ID and version.
+  Render the real Admin component and assert every position is shown, adjustments target
+  the selected position and version, transfers send both versions, and missing sites can
+  be added. At the API boundary, assert the exact routes and JSON payloads.
 
-- [ ] **Step 2: Verify the test fails against the aggregate UI**
+- [x] **Step 2: Verify the tests fail against the aggregate UI and legacy API**
 
-  Run: `source .venv/bin/activate && pytest tests/test_frontend_presentation.py -q`.
+  Run: `cd frontend && npm test -- --run src/api.test.ts src/features/admin/AdminView.test.tsx`.
 
-- [ ] **Step 3: Implement explicit inventory rows**
+- [x] **Step 3: Implement explicit inventory rows**
 
   Keep furniture metadata in the left form. Render site rows in a dedicated section, label aggregate stock as summary only, and require operation kind plus reason before adjustment or transfer.
 
-- [ ] **Step 4: Verify build, lint, Python presentation tests and browser behavior**
+- [x] **Step 4: Verify tests, build, lint and browser behavior**
 
-  Run: `cd frontend && npm run build && npm run lint`; then run the focused pytest file and a Playwright flow that edits Beijing without changing Shanghai.
+  Run: `cd frontend && npm test && npm run build && npm run lint`; then run a browser
+  flow against an isolated temporary database that edits Beijing without changing
+  Shanghai. Verify desktop and 390px layouts have no console errors or horizontal overflow.
 
-- [ ] **Step 5: Commit the Admin slice**
+- [x] **Step 5: Commit the Admin slice**
 
   Commit: `feat: manage inventory by site`.
 

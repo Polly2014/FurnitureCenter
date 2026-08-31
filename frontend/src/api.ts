@@ -1,4 +1,11 @@
-import type { AgentStatus, CatalogMetadata, QueryResult } from './types'
+import type {
+  AgentStatus,
+  CatalogMetadata,
+  CreateInventoryPositionInput,
+  InventoryAdjustmentInput,
+  InventoryTransferInput,
+  QueryResult,
+} from './types'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 
@@ -92,11 +99,42 @@ export function createFurniture(payload: Record<string, string | number | null>)
   })
 }
 
-export function adjustInventory(inventoryId: string, delta: number, reason: string) {
-  return request<{ inventory_id: string; quantity_available: number }>(
+export function adjustInventory(inventoryId: string, payload: InventoryAdjustmentInput) {
+  return request<{
+    inventory_id: string
+    quantity_total: number
+    quantity_available: number
+    version: number
+  }>(
     `/api/admin/inventory/${inventoryId}/adjustments`,
-    { method: 'POST', body: JSON.stringify({ delta, reason }) },
+    { method: 'POST', body: JSON.stringify(payload) },
   )
+}
+
+export function transferInventory(inventoryId: string, payload: InventoryTransferInput) {
+  return request<{
+    transfer_id: string
+    source: { inventory_id: string; quantity_total: number; quantity_available: number; version: number }
+    destination: { inventory_id: string; quantity_total: number; quantity_available: number; version: number }
+  }>(`/api/admin/inventory/${inventoryId}/transfers`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function createInventoryPosition(
+  furnitureId: string,
+  payload: CreateInventoryPositionInput,
+) {
+  return request<{
+    inventory_id: string
+    quantity_total: number
+    quantity_available: number
+    version: number
+  }>(`/api/admin/furniture/${furnitureId}/inventory`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
 }
 
 export function updateFurniture(id: string, payload: Record<string, string | number | null>) {
