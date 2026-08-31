@@ -245,23 +245,23 @@ Cloudflare production application:
 - Produces the current REST catalog result shape plus inventory `version`.
 - Consumes the Task 2 operation semantics exactly.
 
-- [ ] **Step 1: Write failing cross-adapter contract fixtures**
+- [x] **Step 1: Write failing cross-adapter contract fixtures**
 
   Exercise text/category/site/availability queries and the Beijing/Shanghai inventory distribution through Python and Worker adapters.
 
-- [ ] **Step 2: Verify the Worker contract fails before implementation**
+- [x] **Step 2: Verify the Worker contract fails before implementation**
 
   Run: `cd worker && npm test -- catalog-contract.test.ts inventory.test.ts`.
 
-- [ ] **Step 3: Implement D1 repositories and application services**
+- [x] **Step 3: Implement D1 repositories and application services**
 
   Use parameterized statements, bounded limits, explicit field mapping, conditional version updates, and D1 batch/transaction semantics for transfers.
 
-- [ ] **Step 4: Verify all contracts and invariants**
+- [x] **Step 4: Verify all contracts and invariants**
 
   Run both Worker and Python suites and compare normalized fixture output.
 
-- [ ] **Step 5: Commit D1 catalog/inventory**
+- [x] **Step 5: Commit D1 catalog/inventory**
 
   Commit: `feat: port catalog and inventory services to D1`.
 

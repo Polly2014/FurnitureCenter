@@ -18,6 +18,7 @@ describe('initial D1 migration', () => {
         'categories',
         'furniture',
         'furniture_images',
+        'idempotency_records',
         'inventory',
         'inventory_adjustments',
         'sessions',

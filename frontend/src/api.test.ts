@@ -41,6 +41,9 @@ describe('inventory administration API', () => {
       '/api/admin/inventory/inventory-beijing/adjustments',
       expect.objectContaining({
         method: 'POST',
+        headers: expect.objectContaining({
+          'idempotency-key': expect.stringMatching(/^[0-9a-f-]{36}$/),
+        }),
         body: JSON.stringify({
           kind: 'loan',
           delta_total: 0,
@@ -67,6 +70,9 @@ describe('inventory administration API', () => {
       '/api/admin/inventory/inventory-beijing/transfers',
       expect.objectContaining({
         method: 'POST',
+        headers: expect.objectContaining({
+          'idempotency-key': expect.stringMatching(/^[0-9a-f-]{36}$/),
+        }),
         body: JSON.stringify({
           destination_site_id: 'site-shanghai',
           quantity: 2,

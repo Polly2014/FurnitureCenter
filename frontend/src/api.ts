@@ -140,7 +140,11 @@ export function adjustInventory(inventoryId: string, payload: InventoryAdjustmen
     version: number
   }>(
     `/api/admin/inventory/${inventoryId}/adjustments`,
-    { method: 'POST', body: JSON.stringify(payload) },
+    {
+      method: 'POST',
+      headers: { 'Idempotency-Key': crypto.randomUUID() },
+      body: JSON.stringify(payload),
+    },
   )
 }
 
@@ -151,6 +155,7 @@ export function transferInventory(inventoryId: string, payload: InventoryTransfe
     destination: { inventory_id: string; quantity_total: number; quantity_available: number; version: number }
   }>(`/api/admin/inventory/${inventoryId}/transfers`, {
     method: 'POST',
+    headers: { 'Idempotency-Key': crypto.randomUUID() },
     body: JSON.stringify(payload),
   })
 }
