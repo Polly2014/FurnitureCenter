@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<evaluations fixture="catalog-contract.json" count="10">
+  <evaluation id="available-overview">
+    <question>Which available furniture types can be found, and at which sites?</question>
+    <calls><call tool="search_furniture">{"available_only":true,"limit":20}</call></calls>
+    <answer>Three types are available: the open low cabinet in Beijing, the arc-back meeting chair in Beijing and Shanghai, and the oak collaboration table in Shanghai.</answer>
+    <expect>{"0.ok":true,"0.count":3,"0.items.0.id":"furniture-shelf","0.items.1.id":"furniture-arc-chair","0.items.2.id":"furniture-oak-table"}</expect>
+  </evaluation>
+  <evaluation id="chair-distribution">
+    <question>Which seating is available now, and how is its available stock split across sites?</question>
+    <calls><call tool="search_furniture">{"category":"座椅","available_only":true,"limit":20}</call></calls>
+    <answer>Only the arc-back meeting chair is available: 12 in Beijing and 4 in Shanghai, 16 total.</answer>
+    <expect>{"0.count":1,"0.items.0.id":"furniture-arc-chair","0.items.0.quantity_available":16,"0.items.0.inventory.0.quantity_available":4,"0.items.0.inventory.1.quantity_available":12}</expect>
+  </evaluation>
+  <evaluation id="include-unavailable-seating">
+    <question>Which seating types exist even when unavailable stock is included, and which one has no available units?</question>
+    <calls><call tool="search_furniture">{"category":"座椅","available_only":false,"limit":20}</call></calls>
+    <answer>Two seating types exist. The low-back lounge chair has zero available units; the arc-back meeting chair has 16.</answer>
+    <expect>{"0.count":2,"0.items.0.id":"furniture-lounge-chair","0.items.0.quantity_available":0,"0.items.1.id":"furniture-arc-chair","0.items.1.quantity_available":16}</expect>
+  </evaluation>
+  <evaluation id="beijing-reuse">
+    <question>What furniture is currently reusable in Beijing and what is the combined available quantity?</question>
+    <calls><call tool="search_furniture">{"site_id":"site-beijing","available_only":true,"limit":20}</call></calls>
+    <answer>Beijing has the open low cabinet (2 available) and arc-back meeting chair (12 available), for 14 units.</answer>
+    <expect>{"0.count":2,"0.items.0.id":"furniture-shelf","0.items.0.quantity_available":2,"0.items.1.id":"furniture-arc-chair","0.items.1.quantity_available":12}</expect>
+  </evaluation>
+  <evaluation id="shanghai-meeting-options">
+    <question>Which available Shanghai items support meetings or collaboration, and how many of each are available?</question>
+    <calls><call tool="search_furniture">{"site_id":"site-shanghai","available_only":true,"limit":20}</call></calls>
+    <answer>Shanghai has 4 arc-back meeting chairs and 3 oak collaboration tables available.</answer>
+    <expect>{"0.count":2,"0.items.0.id":"furniture-arc-chair","0.items.0.quantity_available":4,"0.items.1.id":"furniture-oak-table","0.items.1.quantity_available":3}</expect>
+  </evaluation>
+  <evaluation id="haworth-details">
+    <question>Find the Haworth item, then report its SKU, condition, total availability, and image availability.</question>
+    <calls><call tool="search_furniture">{"text":"Haworth","available_only":true,"limit":20}</call><call tool="get_furniture">{"furniture_id":"furniture-arc-chair"}</call></calls>
+    <answer>The Haworth arc-back meeting chair is SKU CHR-ARC-01, condition good, with 16 available units and one signed image.</answer>
+    <expect>{"0.count":1,"0.items.0.id":"furniture-arc-chair","1.item.sku":"CHR-ARC-01","1.item.condition":"good","1.item.quantity_available":16,"1.item.images.length":1}</expect>
+  </evaluation>
+  <evaluation id="category-site-coverage">
+    <question>Which category is represented at all three registered sites when unavailable stock is included?</question>
+    <calls><call tool="list_sites">{}</call><call tool="search_furniture">{"category":"座椅","available_only":false,"limit":20}</call></calls>
+    <answer>Seating is represented across Beijing, Shanghai, and Shenzhen.</answer>
+    <expect>{"0.sites.length":3,"1.count":2,"1.items.0.inventory.0.site_id":"site-shenzhen","1.items.1.inventory.0.site_id":"site-shanghai","1.items.1.inventory.1.site_id":"site-beijing"}</expect>
+  </evaluation>
+  <evaluation id="wood-items">
+    <question>Which available items mention wood in their material, and where are they available?</question>
+    <calls><call tool="search_furniture">{"text":"木质","available_only":true,"limit":20}</call></calls>
+    <answer>The open low cabinet is available in Beijing, and the oak collaboration table is available in Shanghai.</answer>
+    <expect>{"0.count":2,"0.items.0.id":"furniture-shelf","0.items.0.inventory.0.site_id":"site-beijing","0.items.1.id":"furniture-oak-table","0.items.1.inventory.0.site_id":"site-shanghai"}</expect>
+  </evaluation>
+  <evaluation id="site-without-availability">
+    <question>Which registered site has no currently available furniture, and what catalog item is still positioned there?</question>
+    <calls><call tool="list_sites">{}</call><call tool="search_furniture">{"available_only":false,"limit":20}</call></calls>
+    <answer>Shenzhen has no currently available furniture; it has the low-back lounge chair with zero available units.</answer>
+    <expect>{"0.sites.2.id":"site-shenzhen","1.items.0.id":"furniture-lounge-chair","1.items.0.inventory.0.site_id":"site-shenzhen","1.items.0.inventory.0.quantity_available":0}</expect>
+  </evaluation>
+  <evaluation id="stable-taxonomy">
+    <question>List the valid category filters and identify which category has an unavailable item.</question>
+    <calls><call tool="list_categories">{}</call><call tool="search_furniture">{"available_only":false,"limit":20}</call></calls>
+    <answer>The filters are storage, seating, and tables. Seating contains the unavailable low-back lounge chair.</answer>
+    <expect>{"0.categories.length":3,"0.categories.0.name":"座椅","0.categories.1.name":"收纳","0.categories.2.name":"桌台","1.items.0.id":"furniture-lounge-chair","1.items.0.category":"座椅"}</expect>
+  </evaluation>
+</evaluations>

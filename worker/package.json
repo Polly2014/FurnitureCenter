@@ -13,14 +13,21 @@
     "deploy:preview": "wrangler deploy --env preview",
     "deploy:production": "wrangler deploy --env production",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "verify:mcp-evals": "node scripts/verify-mcp-evals.mjs",
+    "verify:mcp-client": "node scripts/verify-mcp-client.mjs"
   },
   "dependencies": {
-    "hono": "^4.13.5"
+    "@modelcontextprotocol/server": "2.0.0",
+    "agents": "0.22.0",
+    "hono": "^4.13.5",
+    "zod": "4.3.6"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.22.0",
     "@cloudflare/workers-types": "^5.20260831.1",
+    "@modelcontextprotocol/client": "2.0.0",
+    "@types/node": "22.19.15",
     "typescript": "~6.0.2",
     "vitest": "^4.1.11",
     "wrangler": "^4.127.1"

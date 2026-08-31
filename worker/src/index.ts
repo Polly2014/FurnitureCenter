@@ -7,6 +7,7 @@ import type { Env } from './env'
 import { registerImageRoutes } from './images/routes'
 import { ImageService } from './images/service'
 import { registerInventoryRoutes } from './inventory/routes'
+import { registerMcpRoutes } from './mcp/routes'
 
 const app = new Hono<AuthEnvironment>()
 
@@ -15,6 +16,7 @@ registerCatalogRoutes(app)
 registerChatRoutes(app)
 registerInventoryRoutes(app)
 registerImageRoutes(app)
+registerMcpRoutes(app)
 
 app.get('/health', async (context) => {
   try {
@@ -30,7 +32,6 @@ app.get('/health', async (context) => {
 
 app.all('/api/*', (context) => context.json({ detail: '接口不存在' }, 404))
 app.all('/images/*', (context) => context.json({ detail: '图片不存在' }, 404))
-app.all('/mcp', (context) => context.json({ detail: 'MCP 端点尚未启用' }, 404))
 app.all('*', (context) => context.env.ASSETS.fetch(context.req.raw))
 
 export default {

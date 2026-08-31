@@ -16,6 +16,9 @@ async function sha256(value: string) {
 export async function resetDatabase() {
   await applyD1Migrations(env.DB, env.TEST_MIGRATIONS)
   for (const table of [
+    'mcp_daily_usage',
+    'chat_daily_usage',
+    'image_derivatives',
     'image_cleanup_jobs',
     'image_uploads',
     'idempotency_records',

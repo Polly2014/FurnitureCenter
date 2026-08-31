@@ -99,7 +99,7 @@ function furnitureFromRow(row: FurnitureRow): Furniture {
 export class D1CatalogRepository {
   constructor(private readonly database: D1Database) {}
 
-  async search(query: string | null, filters: QueryFilters, limit: number) {
+  async search(query: string | null, filters: QueryFilters, limit: number, offset = 0) {
     const where: string[] = []
     const bindings: D1Value[] = []
     if (query) {
@@ -145,13 +145,35 @@ export class D1CatalogRepository {
          JOIN categories c ON c.id = f.category_id
          ${whereClause}
          ORDER BY f.name
-         LIMIT ?`,
+         LIMIT ? OFFSET ?`,
       )
-      .bind(...bindings, limit)
+      .bind(...bindings, limit, offset)
       .all<FurnitureRow>()
-    if (furnitureRows.results.length === 0) return []
+    return this.hydrate(furnitureRows.results, filters.siteId)
+  }
 
-    const items = furnitureRows.results.map(furnitureFromRow)
+  async get(id: string) {
+    const row = await this.database
+      .prepare(
+        `SELECT f.id, f.sku, f.name, c.name AS category_name, f.description,
+                f.condition, f.name_en, f.main_category, f.dimensions, f.color,
+                f.material, f.brand, f.image_reference, f.source_workbook,
+                f.source_sheet, f.source_row
+         FROM furniture f
+         JOIN categories c ON c.id = f.category_id
+         WHERE f.id = ?
+         LIMIT 1`,
+      )
+      .bind(id)
+      .first<FurnitureRow>()
+    const items = await this.hydrate(row ? [row] : [], null)
+    return items[0] ?? null
+  }
+
+  private async hydrate(furnitureRows: FurnitureRow[], siteId: string | null) {
+    if (furnitureRows.length === 0) return []
+
+    const items = furnitureRows.map(furnitureFromRow)
     const itemsById = new Map(items.map((item) => [item.id, item]))
     const ids = items.map((item) => item.id)
     const imageStatement = this.database
@@ -163,8 +185,8 @@ export class D1CatalogRepository {
       )
       .bind(...ids)
     const inventoryBindings: D1Value[] = [...ids]
-    const inventorySiteClause = filters.siteId ? 'AND i.site_id = ?' : ''
-    if (filters.siteId) inventoryBindings.push(filters.siteId)
+    const inventorySiteClause = siteId ? 'AND i.site_id = ?' : ''
+    if (siteId) inventoryBindings.push(siteId)
     const inventoryStatement = this.database
       .prepare(
         `SELECT i.id, i.furniture_id, i.quantity_total, i.quantity_available,

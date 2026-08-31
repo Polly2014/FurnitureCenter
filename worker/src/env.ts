@@ -6,5 +6,7 @@ export interface Env {
   ASSETS: Fetcher
   COPILOTX_API_KEY: string
   SESSION_SIGNING_KEY: string
+  /** Explicit comma-separated workers.dev hosts accepted by the preview MCP route. */
+  MCP_ALLOWED_HOSTS?: string
   ENVIRONMENT: 'local' | 'preview' | 'production'
 }

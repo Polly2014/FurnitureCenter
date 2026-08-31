@@ -12,10 +12,15 @@ export class CatalogService {
     siteId?: string | null
     availableOnly?: boolean
     limit?: number
+    offset?: number
   }) {
     const limit = options.limit ?? 50
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
       throw new ApplicationError(422, 'limit must be between 1 and 100')
+    }
+    const offset = options.offset ?? 0
+    if (!Number.isInteger(offset) || offset < 0 || offset > 100_000) {
+      throw new ApplicationError(422, 'offset must be between 0 and 100000')
     }
     const query = options.query?.trim() || null
     const filters: QueryFilters = {
@@ -23,7 +28,7 @@ export class CatalogService {
       siteId: options.siteId?.trim() || null,
       availableOnly: options.availableOnly ?? true,
     }
-    const items = await this.repository.search(query, filters, limit)
+    const items = await this.repository.search(query, filters, limit, offset)
     return {
       items,
       map_features: this.mapFeatures(items),
@@ -40,6 +45,10 @@ export class CatalogService {
 
   metadata() {
     return this.repository.metadata()
+  }
+
+  get(id: string) {
+    return this.repository.get(id)
   }
 
   private mapFeatures(items: Furniture[]): MapFeature[] {
