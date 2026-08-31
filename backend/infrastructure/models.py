@@ -1,6 +1,15 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.infrastructure.database import Base
@@ -77,6 +86,7 @@ class ImageRecord(Base):
 class InventoryRecord(Base):
     __tablename__ = "inventory"
     __table_args__ = (
+        UniqueConstraint("furniture_id", "site_id", name="uq_inventory_furniture_site"),
         CheckConstraint("quantity_total >= 0", name="ck_inventory_total_nonnegative"),
         CheckConstraint("quantity_available >= 0", name="ck_inventory_available_nonnegative"),
         CheckConstraint(
@@ -89,6 +99,9 @@ class InventoryRecord(Base):
     site_id: Mapped[str] = mapped_column(ForeignKey("sites.id"), index=True)
     quantity_total: Mapped[int] = mapped_column(Integer)
     quantity_available: Mapped[int] = mapped_column(Integer)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+    __mapper_args__ = {"version_id_col": version}
 
     furniture: Mapped[FurnitureRecord] = relationship(back_populates="inventory")
     site: Mapped[SiteRecord] = relationship()
@@ -99,7 +112,15 @@ class InventoryAdjustmentRecord(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     inventory_id: Mapped[str] = mapped_column(ForeignKey("inventory.id"), index=True)
-    delta: Mapped[int] = mapped_column(Integer)
+    delta: Mapped[int] = mapped_column(Integer, default=0)
+    kind: Mapped[str] = mapped_column(String(40))
+    delta_total: Mapped[int] = mapped_column(Integer)
+    delta_available: Mapped[int] = mapped_column(Integer)
+    quantity_total_before: Mapped[int] = mapped_column(Integer)
+    quantity_total_after: Mapped[int] = mapped_column(Integer)
+    quantity_available_before: Mapped[int] = mapped_column(Integer)
+    quantity_available_after: Mapped[int] = mapped_column(Integer)
+    transfer_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     reason: Mapped[str] = mapped_column(String(240))
     actor: Mapped[str] = mapped_column(String(120))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

@@ -58,7 +58,9 @@ class SqlAlchemyCatalogRepository:
     @staticmethod
     def _to_domain(record: FurnitureRecord, site_id: str | None) -> Furniture:
         inventory = (
-            position for position in record.inventory if site_id is None or position.site_id == site_id
+            position
+            for position in record.inventory
+            if site_id is None or position.site_id == site_id
         )
         return Furniture(
             id=record.id,
@@ -94,6 +96,7 @@ class SqlAlchemyCatalogRepository:
                     ),
                     position.quantity_total,
                     position.quantity_available,
+                    position.version,
                 )
                 for position in inventory
             ),

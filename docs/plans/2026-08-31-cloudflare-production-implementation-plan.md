@@ -100,28 +100,28 @@ Cloudflare production application:
 - Produces: `create_inventory_position(furniture_id, site_id, quantity_total, quantity_available, actor)`, `adjust_inventory(inventory_id, delta_total, delta_available, kind, reason, actor, expected_version)`, and `transfer_inventory(source_inventory_id, destination_site_id, quantity, reason, actor, expected_source_version)`.
 - Produces REST endpoints `POST /api/admin/furniture/{id}/inventory`, `POST /api/admin/inventory/{id}/adjustments`, and `POST /api/admin/inventory/{id}/transfers`.
 
-- [ ] **Step 1: Write failing repository/API tests**
+- [x] **Step 1: Write failing repository/API tests**
 
   Cover duplicate `(furniture_id, site_id)`, independent total/available deltas, stale versions, negative results, destination creation, atomic transfer, and immutable before/after audit values. Assert the seeded arc chair moves from Beijing `12/18` and Shanghai `4/8` to Beijing `10/16` and Shanghai `6/10` after transferring two available physical items.
 
-- [ ] **Step 2: Verify tests fail for missing contracts**
+- [x] **Step 2: Verify tests fail for missing contracts**
 
   Run: `source .venv/bin/activate && pytest tests/test_inventory_administration.py -q`  
   Expected: failures identify missing commands/endpoints, not test setup errors.
 
-- [ ] **Step 3: Add schema constraints and commands**
+- [x] **Step 3: Add schema constraints and commands**
 
   Add a unique constraint for `(furniture_id, site_id)`, `version INTEGER NOT NULL DEFAULT 1`, adjustment kind, total/available before and after values, and a transfer identifier shared by the paired audit facts.
 
-- [ ] **Step 4: Implement transactional operations**
+- [x] **Step 4: Implement transactional operations**
 
   Adjustment validates `0 <= available <= total`; transfer uses one transaction, checks the expected source version, creates or updates the destination, and commits only after both sides and audit events are staged.
 
-- [ ] **Step 5: Run focused and full Python tests**
+- [x] **Step 5: Run focused and full Python tests**
 
   Run: `source .venv/bin/activate && pytest tests/test_inventory_administration.py -q && pytest -q -W error`.
 
-- [ ] **Step 6: Commit the transaction slice**
+- [x] **Step 6: Commit the transaction slice**
 
   Commit: `feat: add auditable multi-site inventory transactions`.
 
@@ -451,4 +451,3 @@ Cloudflare production application:
 - [ ] **Step 5: Commit final verification records**
 
   Commit only redacted evidence: `docs: record FurnitureCenter production verification`.
-

@@ -1,5 +1,5 @@
-from contextlib import asynccontextmanager
 from collections.abc import Iterator
+from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Response, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,8 +21,11 @@ from backend.api.schemas import (
     CatalogMetadataDto,
     CategoryDto,
     CreateFurnitureRequest,
+    CreateInventoryPositionRequest,
     InventoryAdjustmentRequest,
     InventoryAdjustmentResponse,
+    InventoryTransferRequest,
+    InventoryTransferResponse,
     QueryResultDto,
     SiteDto,
     UpdateFurnitureRequest,
@@ -31,23 +34,34 @@ from backend.application.administration import (
     AdjustInventoryCommand,
     AdministrationService,
     CreateFurnitureCommand,
+    CreateInventoryPositionCommand,
+    InventorySnapshot,
+    TransferInventoryCommand,
     UpdateFurnitureCommand,
 )
 from backend.application.catalog import CatalogService, QueryFilters
 from backend.infrastructure.administration_repository import (
+    ConcurrentModificationError,
     DuplicateEntityError,
     EntityNotFoundError,
     SqlAlchemyAdministrationRepository,
 )
 from backend.infrastructure.catalog_repository import SqlAlchemyCatalogRepository
 from backend.infrastructure.config import get_settings
-from backend.infrastructure.database import Base, SessionLocal, engine, get_session
+from backend.infrastructure.database import (
+    Base,
+    SessionLocal,
+    engine,
+    get_session,
+    upgrade_local_sqlite_schema,
+)
 from backend.infrastructure.models import AuditEventRecord, CategoryRecord, SiteRecord
 from backend.infrastructure.seed import seed_demo_data
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    upgrade_local_sqlite_schema(engine)
     Base.metadata.create_all(engine)
     with SessionLocal() as session:
         seed_demo_data(session)
@@ -119,7 +133,10 @@ def agent_query(
     try:
         planner = build_query_planner(settings)
     except AgentConfigurationError as error:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(error),
+        ) from error
     agent = FurnitureQueryAgent(CatalogService(SqlAlchemyCatalogRepository(session)), planner)
     try:
         result = agent.query(
@@ -174,7 +191,7 @@ def admin_error(error: ValueError) -> HTTPException:
         status.HTTP_404_NOT_FOUND
         if isinstance(error, EntityNotFoundError)
         else status.HTTP_409_CONFLICT
-        if isinstance(error, DuplicateEntityError)
+        if isinstance(error, (DuplicateEntityError, ConcurrentModificationError))
         else status.HTTP_422_UNPROCESSABLE_CONTENT
     )
     return HTTPException(status_code=status_code, detail=str(error))
@@ -209,6 +226,34 @@ def update_furniture(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+def inventory_response(snapshot: InventorySnapshot) -> InventoryAdjustmentResponse:
+    return InventoryAdjustmentResponse(
+        inventory_id=snapshot.inventory_id,
+        quantity_total=snapshot.quantity_total,
+        quantity_available=snapshot.quantity_available,
+        version=snapshot.version,
+    )
+
+
+@app.post(
+    "/api/admin/furniture/{furniture_id}/inventory",
+    response_model=InventoryAdjustmentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_inventory_position(
+    furniture_id: str,
+    request: CreateInventoryPositionRequest,
+    session: Session = Depends(get_session),
+) -> InventoryAdjustmentResponse:
+    try:
+        snapshot = administration_service(session).create_inventory_position(
+            CreateInventoryPositionCommand(furniture_id=furniture_id, **request.model_dump())
+        )
+    except ValueError as error:
+        raise admin_error(error) from error
+    return inventory_response(snapshot)
+
+
 @app.delete("/api/admin/furniture/{furniture_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_furniture(
     furniture_id: str,
@@ -231,15 +276,50 @@ def adjust_inventory(
     request: InventoryAdjustmentRequest,
     session: Session = Depends(get_session),
 ) -> InventoryAdjustmentResponse:
+    delta_total = request.delta_total
+    delta_available = request.delta_available
+    if request.delta is not None and delta_total is None and delta_available is None:
+        delta_total = request.delta
+        delta_available = request.delta
     try:
-        quantity = administration_service(session).adjust_inventory(
-            AdjustInventoryCommand(inventory_id=inventory_id, **request.model_dump())
+        snapshot = administration_service(session).adjust_inventory(
+            AdjustInventoryCommand(
+                inventory_id=inventory_id,
+                delta_total=delta_total or 0,
+                delta_available=delta_available or 0,
+                kind=request.kind,
+                reason=request.reason,
+                actor=request.actor,
+                expected_version=request.expected_version,
+            )
         )
     except ValueError as error:
         raise admin_error(error) from error
-    return InventoryAdjustmentResponse(
-        inventory_id=inventory_id,
-        quantity_available=quantity,
+    return inventory_response(snapshot)
+
+
+@app.post(
+    "/api/admin/inventory/{inventory_id}/transfers",
+    response_model=InventoryTransferResponse,
+)
+def transfer_inventory(
+    inventory_id: str,
+    request: InventoryTransferRequest,
+    session: Session = Depends(get_session),
+) -> InventoryTransferResponse:
+    try:
+        result = administration_service(session).transfer_inventory(
+            TransferInventoryCommand(
+                source_inventory_id=inventory_id,
+                **request.model_dump(),
+            )
+        )
+    except ValueError as error:
+        raise admin_error(error) from error
+    return InventoryTransferResponse(
+        transfer_id=result.transfer_id,
+        source=inventory_response(result.source),
+        destination=inventory_response(result.destination),
     )
 
 

@@ -17,6 +17,7 @@ class InventoryDto(BaseModel):
     site: SiteDto
     quantity_total: int
     quantity_available: int
+    version: int
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -133,14 +134,42 @@ class UpdateFurnitureRequest(BaseModel):
 
 
 class InventoryAdjustmentRequest(BaseModel):
-    delta: int
+    delta: int | None = None
+    delta_total: int | None = None
+    delta_available: int | None = None
+    kind: str = "correction"
     reason: str
     actor: str = "furniture-center-admin"
+    expected_version: int | None = None
 
 
 class InventoryAdjustmentResponse(BaseModel):
     inventory_id: str
+    quantity_total: int
     quantity_available: int
+    version: int
+
+
+class CreateInventoryPositionRequest(BaseModel):
+    site_id: str
+    quantity_total: int
+    quantity_available: int
+    actor: str = "furniture-center-admin"
+
+
+class InventoryTransferRequest(BaseModel):
+    destination_site_id: str
+    quantity: int
+    reason: str
+    expected_source_version: int
+    expected_destination_version: int | None = None
+    actor: str = "furniture-center-admin"
+
+
+class InventoryTransferResponse(BaseModel):
+    transfer_id: str
+    source: InventoryAdjustmentResponse
+    destination: InventoryAdjustmentResponse
 
 
 class AuditEventDto(BaseModel):

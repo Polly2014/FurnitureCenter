@@ -33,6 +33,7 @@ class InventoryPosition:
     site: Site
     quantity_total: int
     quantity_available: int
+    version: int = 1
 
     def __post_init__(self) -> None:
         if self.quantity_total < 0:
