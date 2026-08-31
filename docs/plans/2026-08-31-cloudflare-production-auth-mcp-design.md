@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-31  
 **Status:** Validated direction, ready for implementation planning  
-**Recommended public hostname:** `furni.polly.wang`
+**Confirmed public hostname:** `fc.polly.wang`
 
 ## 1. Goals and decisions
 
@@ -28,19 +28,20 @@ The agreed direction is:
 
 ## 2. Hostname
 
-### Recommendation: `furni.polly.wang`
+### Confirmed choice: `fc.polly.wang`
 
-`furni` is short, readable, furniture-specific, and does not constrain the product to
-only reused inventory. It is easier to understand than the shortest alternative,
-`fc.polly.wang`.
+`fc` is the shortest option and is the confirmed production hostname. Within this
+product, it consistently abbreviates FurnitureCenter. The page title, metadata, and
+login screen should spell out `FurnitureCenter` so the short hostname is not ambiguous
+to first-time users.
 
 Alternatives:
 
 | Hostname | Strength | Trade-off |
 | --- | --- | --- |
+| `fc.polly.wang` | Shortest; confirmed production choice | Needs the UI to spell out FurnitureCenter |
 | `furni.polly.wang` | Short and still recognizable | Slightly coined abbreviation |
 | `reuse.polly.wang` | Memorable and aligned with circular reuse | Too narrow if the catalog later includes new furniture |
-| `fc.polly.wang` | Shortest | Ambiguous outside the project team |
 | `furniture.polly.wang` | Immediately clear | Longer than the other candidates |
 
 Cloudflare DNS had no records for these four names when checked on 2026-08-31. No DNS
@@ -50,10 +51,10 @@ time.
 Recommended routes:
 
 ```text
-https://furni.polly.wang/             Web application
-https://furni.polly.wang/api/*        REST and Chat API
-https://furni.polly.wang/images/*     Authenticated or signed R2 image delivery
-https://furni.polly.wang/mcp          Remote MCP over Streamable HTTP
+https://fc.polly.wang/             Web application
+https://fc.polly.wang/api/*        REST and Chat API
+https://fc.polly.wang/images/*     Authenticated or signed R2 image delivery
+https://fc.polly.wang/mcp          Remote MCP over Streamable HTTP
 ```
 
 Keeping one hostname avoids unnecessary CORS and cookie complexity. The `/mcp` route
@@ -344,7 +345,7 @@ validated through a real deployed preview Worker with separate preview bindings.
 ### Phase 5: Migrate and cut over
 
 - Migrate SQLite and local images to D1/R2 with reconciliation evidence.
-- Create and verify `furni.polly.wang` DNS and Worker route.
+- Create and verify `fc.polly.wang` DNS and Worker route.
 - Perform security, rate-limit, browser, MCP, backup, and rollback checks.
 - Freeze the old writer, complete final reconciliation, and switch production traffic.
 
@@ -352,7 +353,7 @@ validated through a real deployed preview Worker with separate preview bindings.
 
 The future implementation Goal is complete only when:
 
-- `furni.polly.wang` serves the authenticated production application over HTTPS.
+- `fc.polly.wang` serves the authenticated production application over HTTPS.
 - Viewer and admin credentials are separately enforced, individually revocable, and
   absent from source and frontend assets.
 - Web Chat uses a server-side CopilotX Secret without exposing it.
@@ -372,4 +373,3 @@ The future implementation Goal is complete only when:
 - [Cloudflare remote MCP guide](https://developers.cloudflare.com/agents/model-context-protocol/guides/remote-mcp-server/)
 - Existing local architecture: `CLAUDE.md`
 - Existing MVP design: `docs/plans/2026-08-30-furniture-center-mvp-design.md`
-
