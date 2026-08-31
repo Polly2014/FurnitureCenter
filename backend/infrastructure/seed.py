@@ -38,7 +38,7 @@ def seed_demo_data(session: Session) -> None:
             name_en="Arc-back Meeting Chair", main_category="扶手椅和沙发",
             dimensions="600*600*750", color="灰色", material="布艺 / 金属", brand="Haworth",
             images=[ImageRecord(
-                id="image-arc-chair", url="https://images.unsplash.com/photo-1503602642458-232111445657?auto=format&fit=crop&w=1200&q=85",
+                id="image-arc-chair", url="/media/furniture/generated/arc-back-meeting-chair.jpg",
                 alt_text="灰色弧背会议椅", is_primary=True,
             )],
             inventory=[
