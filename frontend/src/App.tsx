@@ -379,10 +379,10 @@ function App() {
 
           <ResizeHandle label="调整详情栏宽度" onResizeStart={(event) => beginResize('context', event)} />
 
-          <section className="context-panel">
-            <aside className="detail-panel"><FurnitureDetail item={selected} /></aside>
+          <section className={`context-panel${selected ? '' : ' is-overview'}`}>
+            {selected && <aside className="detail-panel"><FurnitureDetail item={selected} /></aside>}
             <section className="compact-map-panel">
-              <header><div><span className="eyebrow">LOCATION</span><strong>库存位置</strong></div><small>{mapLocationLabel}</small></header>
+              <header><div><span className="eyebrow">LOCATION</span><strong>{selected ? '库存位置' : '全部库存位置'}</strong></div><small>{mapLocationLabel}</small></header>
               <SpatialMap compact features={mapFeatures} selectedSiteIds={mapSelectedSiteIds} onSelect={selectMapFeature} />
             </section>
           </section>
