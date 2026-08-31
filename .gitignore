@@ -18,3 +18,5 @@ worker/dist/
 /data/import/
 /frontend/public/media/furniture/imported/
 /tmp/
+/.migration/
+/migration-output/
