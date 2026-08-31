@@ -101,3 +101,9 @@ export type AgentStatus = {
   base_url: string
   configured: boolean
 }
+
+export type AuthSession = {
+  role: 'viewer' | 'admin'
+  label: string
+  expires_at: string
+}

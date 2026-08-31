@@ -1,5 +1,6 @@
 import type {
   AgentStatus,
+  AuthSession,
   CatalogMetadata,
   CreateInventoryPositionInput,
   InventoryAdjustmentInput,
@@ -10,9 +11,17 @@ import type {
 const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const method = init?.method?.toUpperCase() ?? 'GET'
+  const headers = new Headers(init?.headers)
+  headers.set('Content-Type', 'application/json')
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+    const csrfToken = readCookie('fc_csrf')
+    if (csrfToken) headers.set('X-CSRF-Token', csrfToken)
+  }
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    credentials: 'include',
+    headers: Object.fromEntries(headers.entries()),
   })
   if (!response.ok) {
     const payload = await response.json().catch(() => null)
@@ -20,6 +29,30 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (response.status === 204) return undefined as T
   return response.json() as Promise<T>
+}
+
+function readCookie(name: string) {
+  if (typeof document === 'undefined') return undefined
+  for (const part of document.cookie.split(';')) {
+    const [cookieName, ...valueParts] = part.trim().split('=')
+    if (cookieName === name) return decodeURIComponent(valueParts.join('='))
+  }
+  return undefined
+}
+
+export function getAuthSession() {
+  return request<AuthSession>('/api/auth/session')
+}
+
+export function login(token: string) {
+  return request<AuthSession>('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  })
+}
+
+export function logout() {
+  return request<void>('/api/auth/logout', { method: 'POST' })
 }
 
 export function getMetadata() {

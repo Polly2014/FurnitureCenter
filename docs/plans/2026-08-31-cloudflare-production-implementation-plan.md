@@ -209,27 +209,27 @@ Cloudflare production application:
 - Produces `POST /api/auth/login`, `GET /api/auth/session`, `POST /api/auth/logout`.
 - Produces `requireRole("viewer" | "admin")` and Bearer-token verification for `/mcp`.
 
-- [ ] **Step 1: Write failing auth tests**
+- [x] **Step 1: Write failing auth tests**
 
   Assert unknown/revoked/expired credentials fail, viewer cannot mutate Admin routes, admin can, cookie flags are `HttpOnly; Secure; SameSite=Strict`, CSRF is enforced, and raw credentials never appear in D1 or responses.
 
-- [ ] **Step 2: Verify tests fail for absent auth routes**
+- [x] **Step 2: Verify tests fail for absent auth routes**
 
   Run: `cd worker && npm test -- auth.test.ts`.
 
-- [ ] **Step 3: Implement token hashes and opaque sessions**
+- [x] **Step 3: Implement token hashes and opaque sessions**
 
   Derive a lookup digest from a high-entropy credential, store only the digest, issue expiring opaque session IDs, and bind each session to the token record so revocation is immediate.
 
-- [ ] **Step 4: Add the React login gate**
+- [x] **Step 4: Add the React login gate**
 
   Exchange a token once, rely on `credentials: "include"`, present non-secret identity state, and keep Admin navigation hidden for viewers while retaining server-side enforcement.
 
-- [ ] **Step 5: Verify Worker tests and browser login flows**
+- [x] **Step 5: Verify Worker tests and browser login flows**
 
   Test viewer, admin, invalid, revoked and logout flows in a local Worker preview.
 
-- [ ] **Step 6: Commit the auth slice**
+- [x] **Step 6: Commit the auth slice**
 
   Commit: `feat: add scoped token and session authentication`.
 

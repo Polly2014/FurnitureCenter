@@ -8,6 +8,28 @@
   --green: #188264;
 }
 
+.auth-shell { min-height: 100vh; padding: 28px; display: grid; place-items: center; background-color: #eef1ec; background-image: linear-gradient(#dfe5de 1px, transparent 1px), linear-gradient(90deg, #dfe5de 1px, transparent 1px); background-size: 34px 34px; }
+.auth-card { width: min(100%, 440px); padding: 34px; border: 1px solid var(--line); background: rgba(251, 252, 249, .97); border-radius: 12px; box-shadow: 0 24px 70px rgba(23, 32, 32, .12); }
+.auth-brand { display: flex; align-items: center; gap: 11px; padding-bottom: 28px; border-bottom: 1px solid var(--line); }
+.auth-brand > span { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 9px; background: var(--ink); color: white; }
+.auth-brand strong, .auth-brand small { display: block; }
+.auth-brand strong { font-size: 13px; letter-spacing: 1.8px; }
+.auth-brand small { margin-top: 2px; color: var(--muted); font-size: 10px; }
+.auth-copy { padding: 30px 0 22px; }
+.auth-copy h1 { margin: 7px 0 10px; font-size: 28px; line-height: 1.2; }
+.auth-copy p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.auth-form { display: grid; gap: 12px; }
+.auth-form label > span { display: block; margin-bottom: 6px; color: var(--muted); font-size: 10px; }
+.auth-token-field { height: 44px; padding: 0 12px; display: grid; grid-template-columns: 20px 1fr; align-items: center; gap: 8px; border: 1px solid #cbd3cc; background: white; border-radius: 7px; }
+.auth-token-field:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-soft); }
+.auth-token-field svg { color: var(--muted); }
+.auth-token-field input { min-width: 0; border: 0; outline: 0; background: transparent; font-size: 13px; }
+.auth-form > button { height: 44px; border: 0; display: flex; align-items: center; justify-content: center; gap: 8px; background: var(--blue); color: white; font-size: 12px; border-radius: 7px; }
+.auth-form > button:disabled { opacity: .64; cursor: wait; }
+.auth-error { margin: 0; padding: 9px 11px; border: 1px solid #e7b8ad; background: #fff2ef; color: #9e392a; border-radius: 6px; font-size: 11px; }
+.auth-card footer { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 10px; }
+.auth-loading { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; }
+
 .app-shell {
   min-height: 100vh;
   background-color: #f3f5f1;
@@ -24,7 +46,10 @@
 .view-switcher button { border: 0; background: transparent; color: #68716f; padding: 8px 14px; display: flex; align-items: center; gap: 7px; font-size: 13px; }
 .view-switcher button.is-active { background: white; color: var(--ink); box-shadow: 0 1px 5px rgba(23, 32, 32, .09); }
 .system-state { justify-self: end; color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 7px; }
-.system-state span { width: 7px; height: 7px; background: var(--green); border-radius: 50%; box-shadow: 0 0 0 4px rgba(24, 130, 100, .11); }
+.status-dot { width: 7px; height: 7px; background: var(--green); border-radius: 50%; box-shadow: 0 0 0 4px rgba(24, 130, 100, .11); }
+.account-label { max-width: 140px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.session-exit { width: 30px; height: 30px; padding: 0; display: grid; place-items: center; border: 1px solid var(--line); background: white; color: var(--muted); }
+.session-exit:hover { color: #9e392a; border-color: #dba99e; }
 
 .query-workspace { height: calc(100vh - 66px); display: grid; grid-template-columns: var(--catalog-width, 270px) 7px minmax(420px, 1fr) 7px var(--context-width, 420px); grid-template-rows: minmax(0, 1fr); overflow: hidden; }
 .catalog-panel, .detail-panel { background: rgba(251, 252, 249, .98); min-width: 0; }
@@ -254,8 +279,11 @@ select, input, textarea { color: var(--ink); }
 }
 
 @media (max-width: 760px) {
-  .topbar { height: 58px; grid-template-columns: 1fr auto; padding: 0 14px; }
-  .brand small, .system-state { display: none; }
+  .auth-shell { padding: 14px; }
+  .auth-card { padding: 24px 20px; }
+  .auth-copy h1 { font-size: 24px; }
+  .topbar { height: 58px; grid-template-columns: 1fr auto auto; gap: 7px; padding: 0 14px; }
+  .brand small, .account-label, .status-dot { display: none; }
   .view-switcher { justify-self: end; }
   .view-switcher button { padding: 7px 9px; font-size: 0; }
   .view-switcher svg { width: 18px; height: 18px; }

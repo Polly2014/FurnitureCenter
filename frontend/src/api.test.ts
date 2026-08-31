@@ -2,6 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   adjustInventory,
   createInventoryPosition,
+  getAuthSession,
+  login,
+  logout,
   transferInventory,
 } from './api'
 
@@ -10,11 +13,13 @@ afterEach(() => {
 })
 
 function stubSuccessfulFetch(payload: unknown = {}) {
-  const fetchMock = vi.fn().mockResolvedValue(
-    new Response(JSON.stringify(payload), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
+  const fetchMock = vi.fn().mockImplementation(() =>
+    Promise.resolve(
+      new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ),
   )
   vi.stubGlobal('fetch', fetchMock)
   return fetchMock
@@ -91,6 +96,51 @@ describe('inventory administration API', () => {
           quantity_total: 5,
           quantity_available: 3,
         }),
+      }),
+    )
+  })
+})
+
+describe('browser session API', () => {
+  it('checks and creates sessions with browser credentials enabled', async () => {
+    const fetchMock = stubSuccessfulFetch({
+      role: 'viewer',
+      label: '访客',
+      expires_at: '2026-09-01T00:00:00.000Z',
+    })
+
+    await getAuthSession()
+    await login('fc_viewer_example')
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/auth/session',
+      expect.objectContaining({ credentials: 'include' }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/auth/login',
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'include',
+        body: JSON.stringify({ token: 'fc_viewer_example' }),
+      }),
+    )
+  })
+
+  it('adds the CSRF cookie value to state-changing requests', async () => {
+    document.cookie = 'fc_csrf=csrf-test-value; Path=/'
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await logout()
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/auth/logout',
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'include',
+        headers: expect.objectContaining({ 'x-csrf-token': 'csrf-test-value' }),
       }),
     )
   })

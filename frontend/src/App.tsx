@@ -4,6 +4,7 @@ import {
   Boxes,
   Check,
   Armchair,
+  LogOut,
   Search,
   Settings2,
   X,
@@ -24,10 +25,12 @@ import {
 import { SpatialMap } from './components/SpatialMap'
 import { ResizeHandle } from './components/ResizeHandle'
 import { AdminView } from './features/admin/AdminView'
+import { AuthGate } from './features/auth/AuthGate'
 import { FurnitureDetail } from './features/gallery/FurnitureDetail'
 import { ChatWorkspace, type ChatMessage } from './features/query/ChatWorkspace'
 import type {
   AgentStatus,
+  AuthSession,
   CatalogMetadata,
   CreateInventoryPositionInput,
   InventoryAdjustmentInput,
@@ -59,7 +62,12 @@ const initialMessages: ChatMessage[] = [
   },
 ]
 
-function App() {
+type FurnitureAppProps = {
+  session: AuthSession
+  onLogout: () => Promise<void>
+}
+
+function FurnitureApp({ session, onLogout }: FurnitureAppProps) {
   const [view, setView] = useState<'query' | 'admin'>('query')
   const [metadata, setMetadata] = useState<CatalogMetadata>({ categories: [], sites: [] })
   const [agentStatus, setAgentStatus] = useState<AgentStatus>()
@@ -368,9 +376,15 @@ function App() {
         </button>
         <nav className="view-switcher" aria-label="主导航">
           <button className={view === 'query' ? 'is-active' : ''} onClick={() => setView('query')}><Search size={16} />查询工作台</button>
-          <button className={view === 'admin' ? 'is-active' : ''} onClick={openAdministration}><Settings2 size={16} />数据管理</button>
+          {session.role === 'admin' && (
+            <button className={view === 'admin' ? 'is-active' : ''} onClick={openAdministration}><Settings2 size={16} />数据管理</button>
+          )}
         </nav>
-        <div className="system-state"><span />目录在线</div>
+        <div className="system-state">
+          <span className="status-dot" />
+          <span className="account-label">{session.label}</span>
+          <button className="session-exit" type="button" onClick={() => void onLogout()} aria-label="退出登录"><LogOut size={15} /></button>
+        </div>
       </header>
 
       {error && <div className="toast error"><X size={16} />{error}<button onClick={() => setError(undefined)} aria-label="关闭"><X size={14} /></button></div>}
@@ -443,6 +457,16 @@ function App() {
         />
       )}
     </div>
+  )
+}
+
+function App() {
+  return (
+    <AuthGate>
+      {({ session, logout: endSession }) => (
+        <FurnitureApp session={session} onLogout={endSession} />
+      )}
+    </AuthGate>
   )
 }
 

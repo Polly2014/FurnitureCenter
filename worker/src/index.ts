@@ -1,7 +1,11 @@
 import { Hono } from 'hono'
+import { registerAuthRoutes } from './auth/routes'
+import type { AuthEnvironment } from './auth/middleware'
 import type { Env } from './env'
 
-const app = new Hono<{ Bindings: Env }>()
+const app = new Hono<AuthEnvironment>()
+
+registerAuthRoutes(app)
 
 app.get('/health', async (context) => {
   try {
@@ -15,6 +19,9 @@ app.get('/health', async (context) => {
   }
 })
 
+app.all('/api/*', (context) => context.json({ detail: '接口不存在' }, 404))
+app.all('/images/*', (context) => context.json({ detail: '图片不存在' }, 404))
+app.all('/mcp', (context) => context.json({ detail: 'MCP 端点尚未启用' }, 404))
 app.all('*', (context) => context.env.ASSETS.fetch(context.req.raw))
 
 export default app
