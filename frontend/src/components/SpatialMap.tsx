@@ -12,9 +12,19 @@ import type { MapFeature } from '../types'
 
 type SpatialMapProps = {
   features: MapFeature[]
-  selectedSiteId?: string
+  selectedSiteIds?: string[]
   onSelect: (feature: MapFeature) => void
   compact?: boolean
+}
+
+function fitMapToFeatures(map: MapLibreMap, features: MapFeature[], compact: boolean, duration: number) {
+  if (features.length === 1) {
+    map.easeTo({ center: [features[0].longitude, features[0].latitude], zoom: compact ? 6.2 : 8, duration })
+  } else if (features.length > 1) {
+    const bounds = new LngLatBounds()
+    features.forEach((feature) => bounds.extend([feature.longitude, feature.latitude]))
+    map.fitBounds(bounds, { padding: compact ? 38 : 90, maxZoom: compact ? 5.5 : 7, duration })
+  }
 }
 
 const mapStyle: StyleSpecification = {
@@ -30,11 +40,16 @@ const mapStyle: StyleSpecification = {
   layers: [{ id: 'openstreetmap', type: 'raster', source: 'openstreetmap' }],
 }
 
-export function SpatialMap({ features, selectedSiteId, onSelect, compact = false }: SpatialMapProps) {
+export function SpatialMap({ features, selectedSiteIds = [], onSelect, compact = false }: SpatialMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<MapLibreMap | null>(null)
   const markersRef = useRef<Marker[]>([])
+  const viewStateRef = useRef({ features, compact })
   const selectFeature = useEffectEvent(onSelect)
+
+  useEffect(() => {
+    viewStateRef.current = { features, compact }
+  }, [compact, features])
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -48,7 +63,11 @@ export function SpatialMap({ features, selectedSiteId, onSelect, compact = false
     if (!compact) map.addControl(new NavigationControl({ showCompass: false }), 'top-right')
     map.addControl(new AttributionControl({ compact: true }), 'bottom-right')
     mapRef.current = map
-    const resizeObserver = new ResizeObserver(() => map.resize())
+    const resizeObserver = new ResizeObserver(() => {
+      map.resize()
+      const viewState = viewStateRef.current
+      fitMapToFeatures(map, viewState.features, viewState.compact, 0)
+    })
     resizeObserver.observe(containerRef.current)
     return () => {
       resizeObserver.disconnect()
@@ -66,7 +85,7 @@ export function SpatialMap({ features, selectedSiteId, onSelect, compact = false
       markersRef.current = features.map((feature) => {
         const element = document.createElement('button')
         element.type = 'button'
-        element.className = `map-marker${feature.site_id === selectedSiteId ? ' is-active' : ''}`
+        element.className = `map-marker${selectedSiteIds.includes(feature.site_id) ? ' is-active' : ''}`
         element.textContent = String(feature.quantity_available)
         element.title = `${feature.site_name} · ${feature.quantity_available} 件可用`
         element.setAttribute('aria-label', element.title)
@@ -75,16 +94,10 @@ export function SpatialMap({ features, selectedSiteId, onSelect, compact = false
           .setLngLat([feature.longitude, feature.latitude])
           .addTo(map)
       })
-      if (features.length === 1) {
-        map.easeTo({ center: [features[0].longitude, features[0].latitude], zoom: compact ? 6.2 : 8, duration: 700 })
-      } else if (features.length > 1) {
-        const bounds = new LngLatBounds()
-        features.forEach((feature) => bounds.extend([feature.longitude, feature.latitude]))
-        map.fitBounds(bounds, { padding: compact ? 28 : 90, maxZoom: compact ? 5.5 : 7, duration: 700 })
-      }
+      fitMapToFeatures(map, features, compact, 700)
     }
     renderMarkers()
-  }, [compact, features, selectedSiteId])
+  }, [compact, features, selectedSiteIds])
 
   return <div className={`spatial-map${compact ? ' is-compact' : ''}`} ref={containerRef} aria-label="家具库存地图" />
 }

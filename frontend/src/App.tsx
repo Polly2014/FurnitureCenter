@@ -1,4 +1,4 @@
-import { type CSSProperties, type FormEvent, type PointerEvent, startTransition, useEffect, useRef, useState } from 'react'
+import { type CSSProperties, type FormEvent, type PointerEvent, startTransition, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowRight,
   Boxes,
@@ -69,8 +69,21 @@ function App() {
   const [notice, setNotice] = useState<string>()
   const workspaceRef = useRef<HTMLElement>(null)
 
-  const selected = result.items.find((item) => item.id === selectedId) ?? result.items[0]
-  const selectedSiteId = selected?.inventory[0]?.site.id
+  const selected = result.items.find((item) => item.id === selectedId)
+  const selectedMapFeatures = useMemo<QueryResult['map_features']>(() => selected?.inventory.map((position) => ({
+    site_id: position.site.id,
+    site_name: position.site.name,
+    latitude: position.site.latitude,
+    longitude: position.site.longitude,
+    quantity_available: position.quantity_available,
+    furniture_ids: [selected.id],
+  })) ?? [], [selected])
+  const selectedSiteIds = useMemo(() => selectedMapFeatures.map((feature) => feature.site_id), [selectedMapFeatures])
+  const mapFeatures = selected ? selectedMapFeatures : result.map_features
+  const mapSelectedSiteIds = selected ? selectedSiteIds : []
+  const mapLocationLabel = selected
+    ? (selected.inventory.length === 1 ? selected.inventory[0].site.name : `${selected.inventory.length} 个园区`)
+    : (mapFeatures.length ? `全部结果 · ${mapFeatures.length} 个园区` : '暂无位置')
 
   async function loadCatalog(overrides?: { query?: string; category?: string; site_id?: string }) {
     setLoading(true)
@@ -84,7 +97,7 @@ function App() {
       })
       startTransition(() => {
         setResult(next)
-        setSelectedId(next.items[0]?.id)
+        setSelectedId(undefined)
       })
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : '无法加载家具目录')
@@ -99,7 +112,7 @@ function App() {
         setMetadata(nextMetadata)
         setResult(nextResult)
         setAgentStatus(nextAgentStatus)
-        setSelectedId(nextResult.items[0]?.id)
+        setSelectedId(undefined)
       })
       .catch((requestError: Error) => setError(requestError.message))
       .finally(() => setLoading(false))
@@ -158,7 +171,7 @@ function App() {
         },
         onResult: (next) => {
           setResult(next)
-          setSelectedId(next.items[0]?.id)
+          setSelectedId(next.items.length === 1 ? next.items[0].id : undefined)
           fallbackAnswer = next.answer ?? fallbackAnswer
         },
         onTextDelta: (delta) => {
@@ -369,8 +382,8 @@ function App() {
           <section className="context-panel">
             <aside className="detail-panel"><FurnitureDetail item={selected} /></aside>
             <section className="compact-map-panel">
-              <header><div><span className="eyebrow">LOCATION</span><strong>库存位置</strong></div><small>{selected?.inventory[0]?.site.name ?? '暂无位置'}</small></header>
-              <SpatialMap compact features={result.map_features} selectedSiteId={selectedSiteId} onSelect={selectMapFeature} />
+              <header><div><span className="eyebrow">LOCATION</span><strong>库存位置</strong></div><small>{mapLocationLabel}</small></header>
+              <SpatialMap compact features={mapFeatures} selectedSiteIds={mapSelectedSiteIds} onSelect={selectMapFeature} />
             </section>
           </section>
         </main>
