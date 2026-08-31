@@ -448,6 +448,61 @@ describe('read-only furniture tools', () => {
     })
   })
 
+  it('round-trips a next-page cursor with maximum-length filters', async () => {
+    const text = 'x'.repeat(200)
+    const category = 'c'.repeat(100)
+    const siteId = `site-${'s'.repeat(95)}`
+    await env.DB.batch([
+      env.DB.prepare('INSERT INTO categories (id, name) VALUES (?, ?)')
+        .bind('category-maximum-filter', category),
+      env.DB.prepare(
+        'INSERT INTO sites (id, code, name, city, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?)',
+      ).bind(siteId, 'MAX', 'Maximum filter site', 'Test City', 0, 0),
+      env.DB.prepare(
+        `INSERT INTO furniture (id, sku, name, category_id, condition)
+         VALUES (?, ?, ?, ?, ?)`,
+      ).bind('furniture-maximum-a', 'MAX-A', `${text} A`, 'category-maximum-filter', 'good'),
+      env.DB.prepare(
+        `INSERT INTO furniture (id, sku, name, category_id, condition)
+         VALUES (?, ?, ?, ?, ?)`,
+      ).bind('furniture-maximum-b', 'MAX-B', `${text} B`, 'category-maximum-filter', 'good'),
+      env.DB.prepare(
+        `INSERT INTO inventory
+          (id, furniture_id, site_id, quantity_total, quantity_available, version)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).bind('inventory-maximum-a', 'furniture-maximum-a', siteId, 1, 1, 1),
+      env.DB.prepare(
+        `INSERT INTO inventory
+          (id, furniture_id, site_id, quantity_total, quantity_available, version)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).bind('inventory-maximum-b', 'furniture-maximum-b', siteId, 1, 1, 1),
+    ])
+
+    const first = toolResult((await rpc('tools/call', {
+      name: 'search_furniture',
+      arguments: { text, category, site_id: siteId, available_only: true, limit: 1 },
+    })).body)
+    expect(first.isError).toBeFalsy()
+    expect(first.structuredContent).toMatchObject({
+      ok: true,
+      items: [{ id: 'furniture-maximum-a' }],
+      next_cursor: expect.any(String),
+    })
+    const cursor = first.structuredContent.next_cursor as string
+    expect(cursor.length).toBeLessThanOrEqual(512)
+
+    const second = toolResult((await rpc('tools/call', {
+      name: 'search_furniture',
+      arguments: { text, category, site_id: siteId, available_only: true, limit: 1, cursor },
+    })).body)
+    expect(second.isError).toBeFalsy()
+    expect(second.structuredContent).toMatchObject({
+      ok: true,
+      items: [{ id: 'furniture-maximum-b' }],
+      next_cursor: null,
+    })
+  })
+
   it('publishes bounded discriminated output contracts for every tool', async () => {
     const listed = await rpc('tools/list')
     const tools = (listed.body.result?.tools ?? []) as Array<{ name: string; outputSchema: unknown }>
@@ -641,6 +696,51 @@ describe('read-only furniture tools', () => {
         { id: 'category-storage', name: '收纳' },
         { id: 'category-tables', name: '桌台' },
       ],
+    })
+  })
+
+  it('fails closed when site metadata exceeds the output bound', async () => {
+    await env.DB.prepare(
+      `WITH RECURSIVE sequence(value) AS (
+         SELECT 1
+         UNION ALL
+         SELECT value + 1 FROM sequence WHERE value < 98
+       )
+       INSERT INTO sites (id, code, name, city, latitude, longitude)
+       SELECT printf('overflow-site-%03d', value), printf('O%03d', value),
+              printf('Overflow site %03d', value), 'Test City', 0, 0
+       FROM sequence`,
+    ).run()
+
+    const result = toolResult((await rpc('tools/call', {
+      name: 'list_sites', arguments: {},
+    })).body)
+    expect(result.isError).toBe(true)
+    expect(result.structuredContent).toEqual({
+      ok: false,
+      error: { code: 'internal_error', message: 'FurnitureCenter could not complete the request.' },
+    })
+  })
+
+  it('fails closed when category metadata exceeds the output bound', async () => {
+    await env.DB.prepare(
+      `WITH RECURSIVE sequence(value) AS (
+         SELECT 1
+         UNION ALL
+         SELECT value + 1 FROM sequence WHERE value < 98
+       )
+       INSERT INTO categories (id, name)
+       SELECT printf('overflow-category-%03d', value), printf('Overflow category %03d', value)
+       FROM sequence`,
+    ).run()
+
+    const result = toolResult((await rpc('tools/call', {
+      name: 'list_categories', arguments: {},
+    })).body)
+    expect(result.isError).toBe(true)
+    expect(result.structuredContent).toEqual({
+      ok: false,
+      error: { code: 'internal_error', message: 'FurnitureCenter could not complete the request.' },
     })
   })
 

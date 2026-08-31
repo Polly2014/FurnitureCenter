@@ -103,14 +103,13 @@ export class D1CatalogRepository {
     const where: string[] = []
     const bindings: D1Value[] = []
     if (query) {
-      const pattern = `%${query}%`
       where.push(
-        `(f.name LIKE ? COLLATE NOCASE OR f.name_en LIKE ? COLLATE NOCASE
-          OR f.description LIKE ? COLLATE NOCASE OR f.sku LIKE ? COLLATE NOCASE
-          OR f.brand LIKE ? COLLATE NOCASE OR f.color LIKE ? COLLATE NOCASE
-          OR f.material LIKE ? COLLATE NOCASE)`,
+        `(INSTR(LOWER(f.name), LOWER(?)) > 0 OR INSTR(LOWER(f.name_en), LOWER(?)) > 0
+          OR INSTR(LOWER(f.description), LOWER(?)) > 0 OR INSTR(LOWER(f.sku), LOWER(?)) > 0
+          OR INSTR(LOWER(f.brand), LOWER(?)) > 0 OR INSTR(LOWER(f.color), LOWER(?)) > 0
+          OR INSTR(LOWER(f.material), LOWER(?)) > 0)`,
       )
-      bindings.push(pattern, pattern, pattern, pattern, pattern, pattern, pattern)
+      bindings.push(query, query, query, query, query, query, query)
     }
     if (filters.category) {
       where.push('c.name = ?')

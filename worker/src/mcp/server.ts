@@ -105,11 +105,8 @@ type CursorContext = {
 }
 
 const cursorClaimsSchema = z.object({
-  v: z.literal(1),
-  query: z.string().max(200).nullable(),
-  category: z.string().max(100).nullable(),
-  site_id: z.string().max(100).nullable(),
-  available_only: z.boolean(),
+  v: z.literal(2),
+  filter_digest: z.string().length(43).regex(/^[A-Za-z0-9_-]+$/u),
   limit: z.number().int().min(1).max(50),
   offset: z.number().int().min(0).max(100_000),
 }).strict()
@@ -145,20 +142,24 @@ async function cursorKey(signingKey: string, usage: 'sign' | 'verify') {
   )
 }
 
-function cursorClaims(context: CursorContext, offset: number) {
-  return {
-    v: 1 as const,
+async function cursorClaims(context: CursorContext, offset: number) {
+  const filterBytes = new TextEncoder().encode(JSON.stringify({
     query: context.query,
     category: context.category,
     site_id: context.siteId,
     available_only: context.availableOnly,
+  }))
+  const filterDigest = await crypto.subtle.digest('SHA-256', filterBytes)
+  return {
+    v: 2 as const,
+    filter_digest: encodeBase64Url(new Uint8Array(filterDigest)),
     limit: context.limit,
     offset,
   }
 }
 
 async function encodeCursor(context: CursorContext, offset: number, signingKey: string) {
-  const claims = cursorClaims(context, offset)
+  const claims = await cursorClaims(context, offset)
   const signature = await crypto.subtle.sign(
     'HMAC',
     await cursorKey(signingKey, 'sign'),
@@ -192,7 +193,7 @@ async function decodeCursor(
       new TextEncoder().encode(JSON.stringify(parsed.data.claims)),
     )
     if (!valid) return null
-    const expected = cursorClaims(context, parsed.data.claims.offset)
+    const expected = await cursorClaims(context, parsed.data.claims.offset)
     if (JSON.stringify(parsed.data.claims) !== JSON.stringify(expected)) return null
     return parsed.data.claims.offset
   } catch {
@@ -354,7 +355,7 @@ export function createFurnitureMcpServer(env: Env, publicOrigin: string) {
         const metadata = await catalog.metadata()
         const structuredContent = sitesSuccessSchema.parse({
           ok: true,
-          sites: metadata.sites.slice(0, 100),
+          sites: metadata.sites,
         })
         return {
           content: [{ type: 'text' as const, text: `${structuredContent.sites.length} sites are registered.` }],
@@ -379,7 +380,7 @@ export function createFurnitureMcpServer(env: Env, publicOrigin: string) {
         const metadata = await catalog.metadata()
         const structuredContent = categoriesSuccessSchema.parse({
           ok: true,
-          categories: metadata.categories.slice(0, 100),
+          categories: metadata.categories,
         })
         return {
           content: [{ type: 'text' as const, text: `${structuredContent.categories.length} categories are registered.` }],
