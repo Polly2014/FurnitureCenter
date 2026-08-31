@@ -376,23 +376,25 @@ Cloudflare production application:
 **Interfaces:**
 - Produces ignored SQL/JSON migration artifacts and a machine-readable reconciliation report.
 
-- [ ] **Step 1: Write failing deterministic export and reconciliation tests**
+- [x] **Step 1: Write failing deterministic export and reconciliation tests**
 
   Assert stable table ordering, escaped SQL, no credentials, row counts, per-furniture/site totals, foreign keys, image byte counts and SHA-256 equality.
 
-- [ ] **Step 2: Verify tests fail before scripts exist**
+- [x] **Step 2: Verify tests fail before scripts exist**
 
   Run: `source .venv/bin/activate && pytest tests/test_cloudflare_migration.py -q`.
 
-- [ ] **Step 3: Implement export and verifier**
+- [x] **Step 3: Implement export and verifier**
 
   Export from a read-only SQLite connection, write only to an ignored migration directory, and fail nonzero on every mismatch.
 
-- [ ] **Step 4: Run against a temporary D1/R2 preview**
+- [x] **Step 4: Run against a temporary local D1/R2 preview**
 
-  Apply migrations, import catalog data, upload image bytes, and save the redacted reconciliation JSON outside Git.
+  Apply migrations to an isolated Wrangler local D1 state, import the real catalog
+  data, reconcile the staged private-R2 bytes, and save the redacted reconciliation
+  JSON outside Git. Remote preview resource creation and upload remain Task 11 gates.
 
-- [ ] **Step 5: Commit migration tooling only**
+- [x] **Step 5: Commit migration tooling only**
 
   Commit: `feat: add verified Cloudflare migration tooling`.
 
