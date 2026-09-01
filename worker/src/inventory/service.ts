@@ -46,8 +46,12 @@ export class InventoryService {
     if (!(await this.repository.furnitureExists(command.furnitureId))) {
       throw new ApplicationError(404, `Furniture not found: ${command.furnitureId}`)
     }
-    if (!(await this.repository.siteExists(command.siteId))) {
+    const site = await this.repository.site(command.siteId)
+    if (!site) {
       throw new ApplicationError(404, `Site not found: ${command.siteId}`)
+    }
+    if (site.is_active !== 1) {
+      throw new ApplicationError(422, 'site is inactive')
     }
     if (await this.repository.positionForSite(command.furnitureId, command.siteId)) {
       throw new ApplicationError(409, 'inventory position already exists for this site')

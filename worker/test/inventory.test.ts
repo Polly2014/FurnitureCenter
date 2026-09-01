@@ -434,6 +434,35 @@ describe('D1 inventory commands', () => {
     expect((await request()).status).toBe(409)
   })
 
+  it('rejects a new shared listing at an inactive site', async () => {
+    const admin = await browserAuth('admin')
+    await env.DB.prepare(
+      "UPDATE sites SET is_active = 0 WHERE id = 'site-beijing'",
+    ).run()
+
+    const response = await SELF.fetch(
+      'https://fc.test/api/admin/furniture/furniture-oak-table/inventory',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...admin.headers },
+        body: JSON.stringify({
+          site_id: 'site-beijing',
+          quantity_total: 2,
+          quantity_available: 2,
+        }),
+      },
+    )
+
+    expect(response.status).toBe(422)
+    expect(await response.json()).toEqual({ detail: 'site is inactive' })
+    expect(
+      await env.DB.prepare(
+        `SELECT COUNT(*) AS count FROM inventory
+         WHERE furniture_id = 'furniture-oak-table' AND site_id = 'site-beijing'`,
+      ).first(),
+    ).toEqual({ count: 0 })
+  })
+
   it('requires idempotency keys and replays one adjustment without applying it twice', async () => {
     const admin = await browserAuth('admin')
     const payload = JSON.stringify({
