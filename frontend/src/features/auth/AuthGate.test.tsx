@@ -19,6 +19,33 @@ beforeEach(() => {
 })
 
 describe('AuthGate', () => {
+  it('removes the unauthenticated gate copy block', async () => {
+    api.getAuthSession.mockRejectedValue(new Error('未认证'))
+    render(
+      <AuthGate>
+        {({ session }) => <p>{session.role}</p>}
+      </AuthGate>,
+    )
+
+    await screen.findByLabelText('访问凭据')
+    expect(screen.queryByText('PRIVATE INVENTORY')).not.toBeInTheDocument()
+    expect(screen.queryByText('访问家具共享目录')).not.toBeInTheDocument()
+    expect(
+      screen.queryByText('输入分配给你的访问凭据。凭据仅用于换取当前浏览器的安全会话，不会保存在页面中。'),
+    ).not.toBeInTheDocument()
+  })
+
+  it('shows the credential prefix in the unauthenticated gate', async () => {
+    api.getAuthSession.mockRejectedValue(new Error('未认证'))
+    render(
+      <AuthGate>
+        {({ session }) => <p>{session.role}</p>}
+      </AuthGate>,
+    )
+
+    expect(await screen.findByLabelText('访问凭据')).toHaveAttribute('placeholder', 'ms-fc-…')
+  })
+
   it('exchanges a token once and renders the authenticated identity without echoing it', async () => {
     const user = userEvent.setup()
     api.getAuthSession.mockRejectedValue(new Error('未认证'))
@@ -33,7 +60,7 @@ describe('AuthGate', () => {
       </AuthGate>,
     )
 
-    const token = 'fc_admin_browser_test_token'
+    const token = 'ms-fc-admin-browser-test-token'
     await user.type(await screen.findByLabelText('访问凭据'), token)
     await user.click(screen.getByRole('button', { name: '进入 FurnitureCenter' }))
 
@@ -52,11 +79,11 @@ describe('AuthGate', () => {
     )
 
     const input = await screen.findByLabelText('访问凭据')
-    await user.type(input, 'invalid-secret-value')
+    await user.type(input, 'ms-fc-invalid-secret-value')
     await user.click(screen.getByRole('button', { name: '进入 FurnitureCenter' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('凭据无效或已失效')
     expect(input).toHaveValue('')
-    expect(screen.queryByText('invalid-secret-value')).not.toBeInTheDocument()
+    expect(screen.queryByText('ms-fc-invalid-secret-value')).not.toBeInTheDocument()
   })
 })

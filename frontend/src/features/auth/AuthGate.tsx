@@ -76,11 +76,6 @@ export function AuthGate({ children }: AuthGateProps) {
           <span><Armchair size={23} /></span>
           <div><strong>FURNITURE CENTER</strong><small>家具中心</small></div>
         </div>
-        <div className="auth-copy">
-          <span className="eyebrow">PRIVATE INVENTORY</span>
-          <h1>访问家具共享目录</h1>
-          <p>输入分配给你的访问凭据。凭据仅用于换取当前浏览器的安全会话，不会保存在页面中。</p>
-        </div>
         <form className="auth-form" onSubmit={(event) => void submit(event)}>
           <label>
             <span>访问凭据</span>
@@ -92,7 +87,7 @@ export function AuthGate({ children }: AuthGateProps) {
                 autoComplete="current-password"
                 required
                 disabled={submitting}
-                placeholder="fc_…"
+                placeholder="ms-fc-…"
               />
             </div>
           </label>
