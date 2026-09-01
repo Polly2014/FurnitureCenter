@@ -1,5 +1,5 @@
 import { type FormEvent, useState } from 'react'
-import { Boxes, Check, Plus, Search, Trash2, X } from 'lucide-react'
+import { ArrowRightLeft, Boxes, Building2, Check, Plus, Search, Trash2, X } from 'lucide-react'
 import type {
   CatalogMetadata,
   CreateInventoryPositionInput,
@@ -7,12 +7,23 @@ import type {
   InventoryAdjustmentInput,
   InventoryTransferInput,
   ImageUploadInput,
+  CreateSiteInput,
+  ManagedSite,
+  TransferFilters,
+  TransferRecord,
+  UpdateSiteInput,
 } from '../../types'
 import { ImageManager } from './ImageManager'
 import { InventoryPositions } from './InventoryPositions'
+import { SiteManager } from './SiteManager'
+import { TransferHistory } from './TransferHistory'
 
 type AdminViewProps = {
   metadata: CatalogMetadata
+  adminSites: ManagedSite[]
+  transfers: TransferRecord[]
+  transferNextCursor: string | null
+  transfersLoading: boolean
   furniture: Furniture[]
   onSave: (event: FormEvent<HTMLFormElement>, furnitureId?: string) => Promise<boolean>
   onDelete: (furnitureId: string) => Promise<boolean>
@@ -26,10 +37,19 @@ type AdminViewProps = {
   onReorderImages: (furnitureId: string, imageIds: string[]) => Promise<boolean>
   onSetPrimaryImage: (furnitureId: string, imageId: string) => Promise<boolean>
   onDeleteImage: (furnitureId: string, imageId: string) => Promise<boolean>
+  onCreateSite: (payload: CreateSiteInput) => Promise<boolean>
+  onUpdateSite: (siteId: string, payload: UpdateSiteInput) => Promise<boolean>
+  onLoadTransfers: (filters: TransferFilters) => Promise<boolean>
 }
+
+type AdminSection = 'items' | 'sites' | 'transfers'
 
 export function AdminView({
   metadata,
+  adminSites,
+  transfers,
+  transferNextCursor,
+  transfersLoading,
   furniture,
   onSave,
   onDelete,
@@ -40,7 +60,11 @@ export function AdminView({
   onReorderImages,
   onSetPrimaryImage,
   onDeleteImage,
+  onCreateSite,
+  onUpdateSite,
+  onLoadTransfers,
 }: AdminViewProps) {
+  const [section, setSection] = useState<AdminSection>('items')
   const [editingId, setEditingId] = useState<string>()
   const editing = furniture.find((item) => item.id === editingId)
   const categoryId = metadata.categories.find((category) => category.name === editing?.category)?.id
@@ -59,7 +83,18 @@ export function AdminView({
         <div><span className="eyebrow">ADMINISTRATION</span><h1>数据管理</h1><p>在这里维护家具目录。所有库存变化都会形成审计记录。</p></div>
         <span className="record-total"><Boxes size={19} />{furniture.length} 类家具</span>
       </section>
-      <div className="admin-layout">
+      <nav className="admin-section-nav" aria-label="管理内容">
+        <button className={section === 'items' ? 'is-active' : ''} type="button" onClick={() => setSection('items')}>
+          <Boxes size={16} />共享物品
+        </button>
+        <button className={section === 'sites' ? 'is-active' : ''} type="button" onClick={() => setSection('sites')}>
+          <Building2 size={16} />园区管理
+        </button>
+        <button className={section === 'transfers' ? 'is-active' : ''} type="button" onClick={() => setSection('transfers')}>
+          <ArrowRightLeft size={16} />调拨记录
+        </button>
+      </nav>
+      {section === 'items' && <div className="admin-layout">
         <section className="admin-form-section">
           <div className="form-heading">
             <h2>{editing ? '编辑家具' : '新增家具'}</h2>
@@ -98,6 +133,7 @@ export function AdminView({
                 onAdjust={onAdjust}
                 onTransfer={onTransfer}
                 onCreatePosition={onCreatePosition}
+                onOpenTransfers={() => setSection('transfers')}
               />
               <ImageManager
                 furniture={editing}
@@ -123,7 +159,19 @@ export function AdminView({
               ))}
           </div>
         </section>
-      </div>
+      </div>}
+      {section === 'sites' && (
+        <SiteManager sites={adminSites} onCreate={onCreateSite} onUpdate={onUpdateSite} />
+      )}
+      {section === 'transfers' && (
+        <TransferHistory
+          records={transfers}
+          sites={adminSites}
+          loading={transfersLoading}
+          nextCursor={transferNextCursor}
+          onLoad={onLoadTransfers}
+        />
+      )}
     </main>
   )
 }

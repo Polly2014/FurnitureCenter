@@ -14,16 +14,20 @@ import {
   adjustInventory,
   createInventoryPosition,
   createFurniture,
+  createSite,
   deleteFurniture,
   deleteFurnitureImage,
   getAgentStatus,
+  getAdminSites,
   getMetadata,
+  getTransfers,
   searchFurniture,
   reorderFurnitureImages,
   setFurniturePrimaryImage,
   streamAgent,
   transferInventory,
   updateFurniture,
+  updateSite,
   uploadFurnitureImage,
 } from './api'
 import { SpatialMap } from './components/SpatialMap'
@@ -36,11 +40,16 @@ import type {
   AgentStatus,
   AuthSession,
   CatalogMetadata,
+  CreateSiteInput,
   CreateInventoryPositionInput,
   InventoryAdjustmentInput,
   InventoryTransferInput,
   ImageUploadInput,
+  ManagedSite,
   QueryResult,
+  TransferFilters,
+  TransferPage,
+  UpdateSiteInput,
 } from './types'
 
 const emptyResult: QueryResult = {
@@ -77,6 +86,9 @@ function FurnitureApp({ session, onLogout }: FurnitureAppProps) {
   const [metadata, setMetadata] = useState<CatalogMetadata>({ categories: [], sites: [] })
   const [agentStatus, setAgentStatus] = useState<AgentStatus>()
   const [result, setResult] = useState<QueryResult>(emptyResult)
+  const [adminSites, setAdminSites] = useState<ManagedSite[]>([])
+  const [transferPage, setTransferPage] = useState<TransferPage>({ items: [], next_cursor: null })
+  const [transfersLoading, setTransfersLoading] = useState(false)
   const [selectedId, setSelectedId] = useState<string>()
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState('')
@@ -86,6 +98,8 @@ function FurnitureApp({ session, onLogout }: FurnitureAppProps) {
   const [agentPhase, setAgentPhase] = useState<'planning' | 'answering'>('planning')
   const [catalogWidth, setCatalogWidth] = useState(250)
   const [contextWidth, setContextWidth] = useState(390)
+  const [contextOpen, setContextOpen] = useState(false)
+  const [contextTab, setContextTab] = useState<'detail' | 'map'>('map')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>()
   const [notice, setNotice] = useState<string>()
@@ -106,6 +120,15 @@ function FurnitureApp({ session, onLogout }: FurnitureAppProps) {
   const mapLocationLabel = selected
     ? (selected.inventory.length === 1 ? selected.inventory[0].site.name : `${selected.inventory.length} 个园区`)
     : (mapFeatures.length ? `全部结果 · ${mapFeatures.length} 个园区` : '暂无位置')
+
+  useEffect(() => {
+    if (!contextOpen) return
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setContextOpen(false)
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [contextOpen])
 
   async function loadCatalog(overrides?: { query?: string; category?: string; site_id?: string }) {
     setLoading(true)
@@ -194,6 +217,10 @@ function FurnitureApp({ session, onLogout }: FurnitureAppProps) {
         onResult: (next) => {
           setResult(next)
           setSelectedId(next.items.length === 1 ? next.items[0].id : undefined)
+          if (next.items.length > 0 || next.map_features.length > 0) {
+            setContextTab(next.items.length === 1 ? 'detail' : 'map')
+            setContextOpen(true)
+          }
           fallbackAnswer = next.answer ?? fallbackAnswer
         },
         onTextDelta: (delta) => {
@@ -235,7 +262,17 @@ function FurnitureApp({ session, onLogout }: FurnitureAppProps) {
 
   function selectMapFeature(feature: QueryResult['map_features'][number]) {
     const furnitureId = feature.furniture_ids.find((id) => result.items.some((item) => item.id === id))
-    if (furnitureId) setSelectedId(furnitureId)
+    if (furnitureId) {
+      setSelectedId(furnitureId)
+      setContextTab('detail')
+      setContextOpen(true)
+    }
+  }
+
+  function selectFurniture(furnitureId: string) {
+    setSelectedId(furnitureId)
+    setContextTab('detail')
+    setContextOpen(true)
   }
 
   function changeCategory(nextCategory: string) {
@@ -314,8 +351,11 @@ function FurnitureApp({ session, onLogout }: FurnitureAppProps) {
   ) {
     try {
       await transferInventory(inventoryId, payload)
-      setNotice('园区库存已完成调拨')
-      await loadCatalog({ query: '', category: '', site_id: '' })
+      setNotice('共享批次已调拨并下架')
+      await Promise.all([
+        loadCatalog({ query: '', category: '', site_id: '' }),
+        loadTransferHistory({ limit: 50 }),
+      ])
       return true
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : '库存调拨失败')
@@ -335,6 +375,53 @@ function FurnitureApp({ session, onLogout }: FurnitureAppProps) {
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : '添加园区库存失败')
       return false
+    }
+  }
+
+  async function refreshSiteData() {
+    const [nextMetadata, nextAdminSites] = await Promise.all([getMetadata(), getAdminSites()])
+    setMetadata(nextMetadata)
+    setAdminSites(nextAdminSites)
+  }
+
+  async function addSite(payload: CreateSiteInput) {
+    try {
+      await createSite(payload)
+      await refreshSiteData()
+      setNotice('园区已创建')
+      return true
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : '园区创建失败')
+      return false
+    }
+  }
+
+  async function changeSiteRecord(siteId: string, payload: UpdateSiteInput) {
+    try {
+      await updateSite(siteId, payload)
+      await refreshSiteData()
+      setNotice('园区信息已更新')
+      return true
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : '园区更新失败')
+      return false
+    }
+  }
+
+  async function loadTransferHistory(filters: TransferFilters = {}) {
+    setTransfersLoading(true)
+    try {
+      const next = await getTransfers(filters)
+      setTransferPage((current) => ({
+        items: filters.cursor ? [...current.items, ...next.items] : next.items,
+        next_cursor: next.next_cursor,
+      }))
+      return true
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : '调拨记录加载失败')
+      return false
+    } finally {
+      setTransfersLoading(false)
     }
   }
 
@@ -397,6 +484,8 @@ function FurnitureApp({ session, onLogout }: FurnitureAppProps) {
     setCategory('')
     setSiteId('')
     void loadCatalog({ query: '', category: '', site_id: '' })
+    void refreshSiteData().catch((requestError: Error) => setError(requestError.message))
+    void loadTransferHistory({ limit: 50 })
   }
 
   function beginResize(pane: 'catalog' | 'context', event: PointerEvent<HTMLButtonElement>) {
@@ -468,7 +557,7 @@ function FurnitureApp({ session, onLogout }: FurnitureAppProps) {
             </form>
             <div className="catalog-list" aria-busy={loading}>
               {result.items.map((item) => (
-                <button key={item.id} className={`catalog-item${selected?.id === item.id ? ' is-selected' : ''}`} onClick={() => setSelectedId(item.id)}>
+                <button key={item.id} className={`catalog-item${selected?.id === item.id ? ' is-selected' : ''}`} onClick={() => selectFurniture(item.id)}>
                   {item.images[0] ? <img src={item.images[0].url} alt={item.images[0].alt_text} /> : <span className="image-placeholder" />}
                   <span className="item-copy"><small>{item.sku}</small><strong>{item.name}</strong><span>{item.brand && item.brand !== '-' ? item.brand : item.category} · {item.dimensions || (conditionLabels[item.condition] ?? item.condition)}</span></span>
                   <span className="availability"><b>{item.quantity_available}</b>可用</span>
@@ -495,9 +584,32 @@ function FurnitureApp({ session, onLogout }: FurnitureAppProps) {
 
           <ResizeHandle label="调整详情栏宽度" onResizeStart={(event) => beginResize('context', event)} />
 
-          <section className={`context-panel${selected ? '' : ' is-overview'}`}>
-            {selected && <aside className="detail-panel"><FurnitureDetail item={selected} /></aside>}
-            <section className="compact-map-panel">
+          <button className={`context-backdrop${contextOpen ? ' is-open' : ''}`} type="button" aria-label="关闭详情面板遮罩" onClick={() => setContextOpen(false)} />
+
+          <section
+            className={`context-panel${selected ? '' : ' is-overview'}${contextOpen ? ' is-open' : ''} is-${contextTab}-view`}
+            aria-label="家具详情与库存位置"
+          >
+            <header className="context-drawer-header">
+              <div className="context-tabs" role="tablist" aria-label="详情视图">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={contextTab === 'detail'}
+                  disabled={!selected}
+                  onClick={() => setContextTab('detail')}
+                >家具详情</button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={contextTab === 'map'}
+                  onClick={() => setContextTab('map')}
+                >库存位置</button>
+              </div>
+              <button className="context-close" type="button" onClick={() => setContextOpen(false)} aria-label="关闭详情面板"><X size={17} /></button>
+            </header>
+            {selected && <aside className="detail-panel context-view"><FurnitureDetail item={selected} /></aside>}
+            <section className="compact-map-panel context-view">
               <header><div><span className="eyebrow">LOCATION</span><strong>{selected ? '库存位置' : '全部库存位置'}</strong></div><small>{mapLocationLabel}</small></header>
               <SpatialMap compact features={mapFeatures} selectedSiteIds={mapSelectedSiteIds} onSelect={selectMapFeature} />
             </section>
@@ -506,6 +618,10 @@ function FurnitureApp({ session, onLogout }: FurnitureAppProps) {
       ) : (
         <AdminView
           metadata={metadata}
+          adminSites={adminSites}
+          transfers={transferPage.items}
+          transferNextCursor={transferPage.next_cursor}
+          transfersLoading={transfersLoading}
           furniture={result.items}
           onSave={saveFurniture}
           onDelete={removeFurniture}
@@ -516,6 +632,9 @@ function FurnitureApp({ session, onLogout }: FurnitureAppProps) {
           onReorderImages={reorderImages}
           onSetPrimaryImage={setPrimaryImage}
           onDeleteImage={removeImage}
+          onCreateSite={addSite}
+          onUpdateSite={changeSiteRecord}
+          onLoadTransfers={loadTransferHistory}
         />
       )}
     </div>

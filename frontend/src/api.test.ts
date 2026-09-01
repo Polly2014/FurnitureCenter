@@ -57,7 +57,7 @@ describe('inventory administration API', () => {
     )
   })
 
-  it('sends both source and destination versions for a transfer', async () => {
+  it('sends only the source version because the destination listing is untouched', async () => {
     const fetchMock = stubSuccessfulFetch()
 
     await transferInventory('inventory-beijing', {
@@ -65,7 +65,6 @@ describe('inventory administration API', () => {
       quantity: 2,
       reason: '上海培训活动',
       expected_source_version: 4,
-      expected_destination_version: 7,
     })
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -80,9 +79,77 @@ describe('inventory administration API', () => {
           quantity: 2,
           reason: '上海培训活动',
           expected_source_version: 4,
-          expected_destination_version: 7,
         }),
       }),
+    )
+  })
+
+  it('creates and updates sites and lists transfer history through admin endpoints', async () => {
+    const fetchMock = stubSuccessfulFetch({ items: [], next_cursor: null })
+    const api = await import('./api') as typeof import('./api') & {
+      getAdminSites: () => Promise<unknown>
+      createSite: (payload: Record<string, unknown>) => Promise<unknown>
+      updateSite: (id: string, payload: Record<string, unknown>) => Promise<unknown>
+      getTransfers: (filters: Record<string, string | number | undefined>) => Promise<unknown>
+    }
+
+    await api.getAdminSites()
+    await api.createSite({
+      code: 'GZ',
+      name: '广州园区',
+      city: '广州',
+      latitude: 23.1291,
+      longitude: 113.2644,
+      is_active: true,
+    })
+    await api.updateSite('site-guangzhou', {
+      name: '广州创新园区',
+      is_active: false,
+      expected_version: 1,
+    })
+    await api.getTransfers({
+      source_site_id: 'site-beijing',
+      destination_site_id: 'site-shanghai',
+      limit: 20,
+      cursor: 'cursor-2',
+    })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/admin/sites',
+      expect.objectContaining({ credentials: 'include' }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/admin/sites',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          code: 'GZ',
+          name: '广州园区',
+          city: '广州',
+          latitude: 23.1291,
+          longitude: 113.2644,
+          is_active: true,
+        }),
+      }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      '/api/admin/sites/site-guangzhou',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({
+          name: '广州创新园区',
+          is_active: false,
+          expected_version: 1,
+        }),
+      }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      '/api/admin/transfers?source_site_id=site-beijing&destination_site_id=site-shanghai&limit=20&cursor=cursor-2',
+      expect.objectContaining({ credentials: 'include' }),
     )
   })
 

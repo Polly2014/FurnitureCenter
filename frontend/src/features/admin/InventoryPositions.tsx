@@ -23,6 +23,7 @@ type InventoryPositionsProps = {
     furnitureId: string,
     payload: CreateInventoryPositionInput,
   ) => Promise<boolean>
+  onOpenTransfers: () => void
 }
 
 const adjustmentKinds = {
@@ -42,8 +43,11 @@ export function InventoryPositions({
   onAdjust,
   onTransfer,
   onCreatePosition,
+  onOpenTransfers,
 }: InventoryPositionsProps) {
   const [active, setActive] = useState<ActiveOperation>()
+  const [transferQuantity, setTransferQuantity] = useState(1)
+  const [transferCompleted, setTransferCompleted] = useState(false)
   const occupiedSiteIds = new Set(furniture.inventory.map((position) => position.site.id))
   const missingSites = sites.filter((site) => !occupiedSiteIds.has(site.id))
 
@@ -74,17 +78,16 @@ export function InventoryPositions({
     event.preventDefault()
     const form = new FormData(event.currentTarget)
     const destinationSiteId = String(form.get('destination_site_id'))
-    const destination = furniture.inventory.find(
-      (candidate) => candidate.site.id === destinationSiteId,
-    )
     const saved = await onTransfer(position.id, {
       destination_site_id: destinationSiteId,
-      quantity: Number(form.get('quantity')),
+      quantity: transferQuantity,
       reason: String(form.get('reason')).trim(),
       expected_source_version: position.version,
-      expected_destination_version: destination?.version ?? null,
     })
-    if (saved) setActive(undefined)
+    if (saved) {
+      setActive(undefined)
+      setTransferCompleted(true)
+    }
   }
 
   async function submitPosition(event: FormEvent<HTMLFormElement>) {
@@ -138,7 +141,10 @@ export function InventoryPositions({
                     type="button"
                     aria-label={`从${position.site.name}调拨`}
                     disabled={otherSites.length === 0 || position.quantity_available === 0}
-                    onClick={() => setActive({ mode: 'transfer', inventoryId: position.id })}
+                    onClick={() => {
+                      setTransferQuantity(1)
+                      setActive({ mode: 'transfer', inventoryId: position.id })
+                    }}
                   >
                     <ArrowRightLeft size={15} />调拨
                   </button>
@@ -200,7 +206,8 @@ export function InventoryPositions({
                       type="number"
                       min="1"
                       max={position.quantity_available}
-                      defaultValue="1"
+                      value={transferQuantity}
+                      onChange={(event) => setTransferQuantity(Number(event.target.value))}
                       required
                     />
                   </label>
@@ -208,7 +215,24 @@ export function InventoryPositions({
                     <span>原因</span>
                     <input name="reason" required placeholder="例如：上海培训活动" />
                   </label>
-                  <button className="primary-button compact" type="submit">确认调拨</button>
+                  <div className="transfer-warning" role="note">
+                    <p>当前共享 {position.quantity_available} 件，本次调拨 {transferQuantity || 0} 件。</p>
+                    <p>
+                      确认后，该共享批次将全部下架；目标园区不会自动入库，剩余{' '}
+                      {Math.max(position.quantity_available - (transferQuantity || 0), 0)} 件也不会继续出现在共享目录中。
+                    </p>
+                  </div>
+                  <button
+                    className="primary-button compact"
+                    type="submit"
+                    disabled={
+                      !Number.isInteger(transferQuantity)
+                      || transferQuantity < 1
+                      || transferQuantity > position.quantity_available
+                    }
+                  >
+                    确认调拨并下架
+                  </button>
                   <button
                     className="icon-button"
                     type="button"
@@ -223,6 +247,12 @@ export function InventoryPositions({
           )
         })}
       </div>
+
+      {transferCompleted && (
+        <button className="view-transfer-history" type="button" onClick={onOpenTransfers}>
+          <ArrowRightLeft size={15} />查看调拨记录
+        </button>
+      )}
 
       {missingSites.length > 0 && active?.mode !== 'create' && (
         <button

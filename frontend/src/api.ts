@@ -2,12 +2,17 @@ import type {
   AgentStatus,
   AuthSession,
   CatalogMetadata,
+  CreateSiteInput,
   CreateInventoryPositionInput,
   InventoryAdjustmentInput,
   InventoryTransferInput,
   ImageRef,
   ImageUploadInput,
   QueryResult,
+  ManagedSite,
+  TransferFilters,
+  TransferPage,
+  UpdateSiteInput,
 } from './types'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? ''
@@ -157,9 +162,16 @@ export function adjustInventory(inventoryId: string, payload: InventoryAdjustmen
 
 export function transferInventory(inventoryId: string, payload: InventoryTransferInput) {
   return request<{
-    transfer_id: string
-    source: { inventory_id: string; quantity_total: number; quantity_available: number; version: number }
-    destination: { inventory_id: string; quantity_total: number; quantity_available: number; version: number }
+    transfer: TransferPage['items'][number]
+    source: {
+      inventory_id: string
+      quantity_total: number
+      quantity_available: number
+      version: number
+      status: 'allocated'
+      closed_at: string
+      closed_reason: 'transferred'
+    }
   }>(`/api/admin/inventory/${inventoryId}/transfers`, {
     method: 'POST',
     headers: { 'Idempotency-Key': crypto.randomUUID() },
@@ -191,6 +203,42 @@ export function updateFurniture(id: string, payload: Record<string, string | num
 
 export function deleteFurniture(id: string) {
   return request<void>(`/api/admin/furniture/${id}`, { method: 'DELETE' })
+}
+
+export function getAdminSites() {
+  return request<ManagedSite[]>('/api/admin/sites')
+}
+
+export function createSite(payload: CreateSiteInput) {
+  return request<ManagedSite>('/api/admin/sites', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function updateSite(id: string, payload: UpdateSiteInput) {
+  return request<ManagedSite>(`/api/admin/sites/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function getTransfers(filters: TransferFilters = {}) {
+  const params = new URLSearchParams()
+  const entries: Array<[keyof TransferFilters, string | number | undefined]> = [
+    ['furniture_id', filters.furniture_id],
+    ['source_site_id', filters.source_site_id],
+    ['destination_site_id', filters.destination_site_id],
+    ['from', filters.from],
+    ['to', filters.to],
+    ['limit', filters.limit],
+    ['cursor', filters.cursor],
+  ]
+  for (const [key, value] of entries) {
+    if (value !== undefined && value !== '') params.set(key, String(value))
+  }
+  const query = params.toString()
+  return request<TransferPage>(`/api/admin/transfers${query ? `?${query}` : ''}`)
 }
 
 function uploadImageBytes(
