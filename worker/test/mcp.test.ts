@@ -346,7 +346,7 @@ describe('authenticated stateless MCP transport', () => {
 })
 
 describe('read-only furniture tools', () => {
-  it('returns bounded filtered search results with per-site inventory and pagination', async () => {
+  it('returns bounded filtered results without closed shared listings', async () => {
     const { body } = await rpc('tools/call', {
       name: 'search_furniture',
       arguments: { category: '座椅', available_only: false, limit: 1 },
@@ -356,9 +356,15 @@ describe('read-only furniture tools', () => {
     expect(result.content).toEqual([{ type: 'text', text: expect.stringContaining('1') }])
     expect(result.structuredContent).toMatchObject({
       ok: true,
-      items: [{ id: 'furniture-lounge-chair', inventory: [{ site_id: 'site-shenzhen', quantity_available: 0 }] }],
+      items: [{
+        id: 'furniture-arc-chair',
+        inventory: [
+          { site_id: 'site-shanghai', quantity_available: 4 },
+          { site_id: 'site-beijing', quantity_available: 12 },
+        ],
+      }],
       count: 1,
-      next_cursor: expect.any(String),
+      next_cursor: null,
     })
 
     const invalid = await rpc('tools/call', {
@@ -386,14 +392,13 @@ describe('read-only furniture tools', () => {
       'furniture-arc-chair',
     ])
 
-    const includingUnavailable = toolResult((await rpc('tools/call', {
+    const availabilityFlagDisabled = toolResult((await rpc('tools/call', {
       name: 'search_furniture',
       arguments: { site_id: 'site-beijing', available_only: false, limit: 20 },
     })).body)
-    expect((includingUnavailable.structuredContent.items as Array<{ id: string }>).map((item) => item.id)).toEqual([
+    expect((availabilityFlagDisabled.structuredContent.items as Array<{ id: string }>).map((item) => item.id)).toEqual([
       'furniture-shelf',
       'furniture-arc-chair',
-      'furniture-oak-table',
     ])
   })
 
@@ -672,6 +677,37 @@ describe('read-only furniture tools', () => {
     vi.setSystemTime(new Date((expiry + 1) * 1_000))
     const expired = await SELF.fetch(imageUrl.toString())
     expect(expired.status).toBe(401)
+  })
+
+  it('uses the same active shared-listing and active-site boundary as the Web catalog', async () => {
+    await env.DB.batch([
+      env.DB.prepare(
+        `UPDATE inventory
+         SET status = 'allocated'
+         WHERE id = 'inventory-arc-bj'`,
+      ),
+      env.DB.prepare(
+        `UPDATE sites SET is_active = 0 WHERE id = 'site-shenzhen'`,
+      ),
+    ])
+
+    const furniture = toolResult((await rpc('tools/call', {
+      name: 'get_furniture',
+      arguments: { furniture_id: 'furniture-arc-chair' },
+    })).body)
+    expect(furniture.structuredContent).toMatchObject({
+      ok: true,
+      item: {
+        quantity_available: 4,
+        inventory: [{ site_id: 'site-shanghai', quantity_available: 4 }],
+      },
+    })
+    const sites = toolResult((await rpc('tools/call', {
+      name: 'list_sites',
+      arguments: {},
+    })).body)
+    expect((sites.structuredContent.sites as Array<{ id: string }>).map((site) => site.id))
+      .toEqual(['site-shanghai', 'site-beijing'])
   })
 
   it('returns stable bounded site and category metadata', async () => {

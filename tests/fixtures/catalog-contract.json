@@ -166,12 +166,11 @@
       }
     },
     {
-      "name": "availability can be disabled",
+      "name": "closed shared listings stay hidden when availability flag is disabled",
       "params": { "category": "座椅", "available_only": false },
       "expected": {
-        "item_ids": ["furniture-lounge-chair", "furniture-arc-chair"],
+        "item_ids": ["furniture-arc-chair"],
         "inventory": {
-          "furniture-lounge-chair": [["site-shenzhen", 10, 0, 1]],
           "furniture-arc-chair": [["site-beijing", 18, 12, 1], ["site-shanghai", 8, 4, 1]]
         },
         "map": {

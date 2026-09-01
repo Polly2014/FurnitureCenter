@@ -1,6 +1,17 @@
-import type { Site } from '../catalog/models'
+export type ManagedSite = {
+  id: string
+  code: string
+  name: string
+  city: string
+  latitude: number
+  longitude: number
+  is_active: boolean
+  version: number
+  created_at: string
+  updated_at: string
+}
 
-type SiteRow = Omit<Site, 'is_active'> & { is_active: number }
+type SiteRow = Omit<ManagedSite, 'is_active'> & { is_active: number }
 
 export type SaveSiteRecord = {
   code: string
@@ -11,7 +22,7 @@ export type SaveSiteRecord = {
   isActive: boolean
 }
 
-function siteFromRow(row: SiteRow): Site {
+function siteFromRow(row: SiteRow): ManagedSite {
   return { ...row, is_active: row.is_active === 1 }
 }
 
@@ -50,7 +61,7 @@ export class D1SiteRepository {
   async create(record: SaveSiteRecord, actor: string) {
     const id = crypto.randomUUID()
     const timestamp = new Date().toISOString()
-    const site: Site = {
+    const site: ManagedSite = {
       id,
       code: record.code,
       name: record.name,
@@ -83,9 +94,14 @@ export class D1SiteRepository {
     return site
   }
 
-  async update(current: Site, record: SaveSiteRecord, expectedVersion: number, actor: string) {
+  async update(
+    current: ManagedSite,
+    record: SaveSiteRecord,
+    expectedVersion: number,
+    actor: string,
+  ) {
     const updatedAt = new Date().toISOString()
-    const site: Site = {
+    const site: ManagedSite = {
       ...current,
       code: record.code,
       name: record.name,

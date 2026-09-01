@@ -1,4 +1,4 @@
-import { SELF } from 'cloudflare:test'
+import { env, SELF } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { browserAuth, contract, resetDatabase, seedContractCatalog } from './helpers'
 
@@ -119,6 +119,35 @@ describe('D1 catalog adapter contract', () => {
       headers: { Cookie: auth.cookie },
     })
     expect(invalid.status).toBe(422)
+  })
+
+  it('hides inactive sites and every closed or unavailable shared listing', async () => {
+    await env.DB.batch([
+      env.DB.prepare(
+        `UPDATE inventory
+         SET status = 'allocated'
+         WHERE id = 'inventory-arc-bj'`,
+      ),
+      env.DB.prepare(
+        `UPDATE sites SET is_active = 0 WHERE id = 'site-shenzhen'`,
+      ),
+    ])
+    const auth = await browserAuth('viewer')
+    const response = await SELF.fetch(
+      'https://fc.test/api/catalog/furniture?available_only=false',
+      { headers: { Cookie: auth.cookie } },
+    )
+    const payload = await response.json<QueryPayload>()
+    const arc = payload.items.find((item) => item.id === 'furniture-arc-chair')
+    expect(arc?.inventory.map((position) => position.site.id)).toEqual(['site-shanghai'])
+    expect(arc?.quantity_available).toBe(4)
+    expect(payload.items.map((item) => item.id)).not.toContain('furniture-lounge-chair')
+
+    const metadata = await SELF.fetch('https://fc.test/api/catalog/metadata', {
+      headers: { Cookie: auth.cookie },
+    })
+    expect((await metadata.json<{ sites: Array<{ id: string }> }>()).sites)
+      .not.toContainEqual(expect.objectContaining({ id: 'site-shenzhen' }))
   })
 
   it('treats SQL metacharacters as search text rather than executable input', async () => {
