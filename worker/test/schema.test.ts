@@ -25,11 +25,44 @@ describe('initial D1 migration', () => {
         'inventory_adjustments',
         'sessions',
         'sites',
+        'transfer_records',
       ]),
     )
   })
 
-  it('enforces one inventory position per furniture and site', async () => {
+  it('adds site lifecycle, shared-listing state and immutable transfer fields', async () => {
+    const siteColumns = await env.DB.prepare('PRAGMA table_info(sites)').all<{ name: string }>()
+    const inventoryColumns = await env.DB.prepare('PRAGMA table_info(inventory)').all<{ name: string }>()
+    const transferColumns = await env.DB.prepare('PRAGMA table_info(transfer_records)').all<{ name: string }>()
+
+    expect(siteColumns.results.map((column) => column.name)).toEqual(
+      expect.arrayContaining(['is_active', 'version', 'created_at', 'updated_at']),
+    )
+    expect(inventoryColumns.results.map((column) => column.name)).toEqual(
+      expect.arrayContaining(['status', 'closed_at', 'closed_reason']),
+    )
+    expect(transferColumns.results.map((column) => column.name)).toEqual(
+      expect.arrayContaining([
+        'furniture_id',
+        'source_inventory_id',
+        'source_site_id',
+        'source_site_code_snapshot',
+        'source_site_name_snapshot',
+        'destination_site_id',
+        'destination_site_code_snapshot',
+        'destination_site_name_snapshot',
+        'listed_quantity_before',
+        'transferred_quantity',
+        'unlisted_remainder',
+        'reason',
+        'actor_token_id',
+        'actor_label_snapshot',
+        'created_at',
+      ]),
+    )
+  })
+
+  it('enforces one current shared listing per furniture and site', async () => {
     await env.DB.prepare('INSERT INTO categories (id, name) VALUES (?, ?)')
       .bind('category-seating', '座椅')
       .run()

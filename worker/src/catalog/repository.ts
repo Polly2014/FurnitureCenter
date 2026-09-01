@@ -42,12 +42,19 @@ type InventoryRow = {
   quantity_total: number
   quantity_available: number
   version: number
+  status: 'active' | 'allocated' | 'withdrawn'
+  closed_at: string | null
+  closed_reason: string | null
   site_id: string
   site_code: string
   site_name: string
   site_city: string
   site_latitude: number
   site_longitude: number
+  site_is_active: number
+  site_version: number
+  site_created_at: string
+  site_updated_at: string
 }
 
 export type CreateFurnitureRecord = {
@@ -189,9 +196,12 @@ export class D1CatalogRepository {
     const inventoryStatement = this.database
       .prepare(
         `SELECT i.id, i.furniture_id, i.quantity_total, i.quantity_available,
-                i.version, s.id AS site_id, s.code AS site_code, s.name AS site_name,
+                i.version, i.status, i.closed_at, i.closed_reason,
+                s.id AS site_id, s.code AS site_code, s.name AS site_name,
                 s.city AS site_city, s.latitude AS site_latitude,
-                s.longitude AS site_longitude
+                s.longitude AS site_longitude, s.is_active AS site_is_active,
+                s.version AS site_version, s.created_at AS site_created_at,
+                s.updated_at AS site_updated_at
          FROM inventory i
          JOIN sites s ON s.id = i.site_id
          WHERE i.furniture_id IN (${placeholders(ids.length)}) ${inventorySiteClause}
@@ -224,10 +234,17 @@ export class D1CatalogRepository {
           city: row.site_city,
           latitude: row.site_latitude,
           longitude: row.site_longitude,
+          is_active: row.site_is_active === 1,
+          version: row.site_version,
+          created_at: row.site_created_at,
+          updated_at: row.site_updated_at,
         },
         quantity_total: row.quantity_total,
         quantity_available: row.quantity_available,
         version: row.version,
+        status: row.status,
+        closed_at: row.closed_at,
+        closed_reason: row.closed_reason,
       }
       const item = itemsById.get(row.furniture_id)
       if (item) {
@@ -242,12 +259,16 @@ export class D1CatalogRepository {
     const [categories, sites] = await this.database.batch<Category | Site>([
       this.database.prepare('SELECT id, name FROM categories ORDER BY name, id'),
       this.database.prepare(
-        'SELECT id, code, name, city, latitude, longitude FROM sites ORDER BY name, id',
+        `SELECT id, code, name, city, latitude, longitude,
+                is_active, version, created_at, updated_at
+         FROM sites WHERE is_active = 1 ORDER BY name, id`,
       ),
     ])
     return {
       categories: categories.results.filter((row): row is Category => !('code' in row)),
-      sites: sites.results.filter((row): row is Site => 'code' in row),
+      sites: sites.results
+        .filter((row): row is Omit<Site, 'is_active'> & { is_active: number } => 'code' in row)
+        .map((row) => ({ ...row, is_active: row.is_active === 1 })),
     }
   }
 

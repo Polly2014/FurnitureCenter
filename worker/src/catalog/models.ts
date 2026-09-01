@@ -22,6 +22,10 @@ export type Site = {
   city: string
   latitude: number
   longitude: number
+  is_active: boolean
+  version: number
+  created_at: string
+  updated_at: string
 }
 
 export type FurnitureImage = {
@@ -37,6 +41,9 @@ export type InventoryPosition = {
   quantity_total: number
   quantity_available: number
   version: number
+  status: 'active' | 'allocated' | 'withdrawn'
+  closed_at: string | null
+  closed_reason: string | null
 }
 
 export type Furniture = {

@@ -8,6 +8,7 @@ import { registerImageRoutes } from './images/routes'
 import { ImageService } from './images/service'
 import { registerInventoryRoutes } from './inventory/routes'
 import { registerMcpRoutes } from './mcp/routes'
+import { registerSiteRoutes } from './sites/routes'
 
 const app = new Hono<AuthEnvironment>()
 
@@ -15,6 +16,7 @@ registerAuthRoutes(app)
 registerCatalogRoutes(app)
 registerChatRoutes(app)
 registerInventoryRoutes(app)
+registerSiteRoutes(app)
 registerImageRoutes(app)
 registerMcpRoutes(app)
 

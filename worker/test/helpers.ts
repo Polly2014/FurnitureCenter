@@ -26,6 +26,7 @@ export async function resetDatabase() {
     'access_tokens',
     'audit_events',
     'inventory_adjustments',
+    'transfer_records',
     'inventory',
     'furniture_images',
     'furniture',
@@ -52,10 +53,22 @@ export async function seedContractCatalog() {
       .run()
   }
   for (const site of contract.sites) {
+    const timestamp = new Date().toISOString()
     await env.DB.prepare(
-      'INSERT INTO sites (id, code, name, city, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?)',
+      `INSERT INTO sites
+        (id, code, name, city, latitude, longitude, is_active, version, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?, ?)`,
     )
-      .bind(site.id, site.code, site.name, site.city, site.latitude, site.longitude)
+      .bind(
+        site.id,
+        site.code,
+        site.name,
+        site.city,
+        site.latitude,
+        site.longitude,
+        timestamp,
+        timestamp,
+      )
       .run()
   }
   for (const furniture of contract.furniture) {
