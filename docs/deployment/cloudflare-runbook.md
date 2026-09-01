@@ -3,7 +3,8 @@
 This runbook keeps preview and production physically separate.  Never bind an
 environment to the other's D1 database, R2 bucket, token records, or secrets.
 All token plaintext and Worker Secret values stay out of source, terminal
-history, command arguments, logs, reports, and commits.
+history, command arguments, logs, reports, and commits. The sole authorized
+exception is the local, ignored preview credential file described below.
 
 ## Current preview checkpoint
 
@@ -59,14 +60,32 @@ openssl rand -base64 48 | npx wrangler secret put SESSION_SIGNING_KEY --env prev
 
 Do not use `wrangler deploy --temporary`.
 
-## Human credential-issuance boundary
+## Authorized local preview credentials
 
-There is deliberately no bootstrap credential or token-creation endpoint.  A
-human must create three high-entropy plaintext values (browser viewer, browser
-admin, and dedicated MCP client), retain them securely, and insert **only
-SHA-256 hashes** into D1.  Run this once per credential from a trusted terminal
-at `worker/`; the secret is entered without echo, and the raw value is unset
-before Wrangler receives the SQL:
+There is deliberately no bootstrap credential or token-creation endpoint. The
+user-authorized helper below creates three unique `ms-fc-` credentials with at
+least 256 bits of entropy: a browser viewer, a browser admin, and a dedicated
+MCP client. It writes raw values only to the exact repository-root file
+`.env.preview-credentials.local`, refuses to overwrite it, sets mode `0600`,
+and prints only its path. That exact filename is Git-ignored and must remain
+untracked; never copy it into the main `.env`, a shell command, chat, a report,
+or a commit.
+
+```sh
+python scripts/generate_preview_credentials.py
+chmod 600 .env.preview-credentials.local
+git check-ignore -v .env.preview-credentials.local
+```
+
+Insert **only SHA-256 hashes** into preview D1 through an in-process reader of
+the local file. Use the role/label pairs `viewer` / `preview-browser-viewer`,
+`admin` / `preview-admin`, and `viewer` / `preview-mcp-client`; preserve an
+individual D1 ID for each record. The raw values must be unset or discarded
+before Wrangler is called, and neither values nor hashes should be printed.
+
+For a manual emergency issuance, run this once per credential from a trusted
+terminal at `worker/`; the token is entered without echo and the raw value is
+unset before Wrangler receives the SQL:
 
 ```sh
 read -rs 'Preview token: ' FC_TOKEN; printf '\n'
@@ -81,11 +100,25 @@ unset FC_TOKEN_HASH FC_TOKEN_ID
 ```
 
 Enter the browser credentials directly into the deployed login page and the
-MCP credential into a trusted Streamable HTTP client.  Do not send any of the
-plaintext values through chat.  Test invalid/revoked credentials separately,
-CSRF logout, viewer/admin route boundaries, Chat streaming, four image reads,
-an inventory adjustment and transfer (with audit rows), MCP discovery/tools,
-and sanitized logs.  Record only IDs, role/labels, outcomes, and version IDs.
+MCP credential into a trusted Streamable HTTP client. Do not send any plaintext
+value through chat. Test invalid/revoked credentials separately, CSRF logout,
+viewer/admin route boundaries, Chat streaming, four image reads, an inventory
+adjustment and transfer (with audit rows), MCP discovery/tools, and sanitized
+logs. Record only IDs, role/labels, outcomes, and version IDs.
+
+To rotate a preview credential, first revoke its D1 record, then remove the
+local credential file on the trusted machine, regenerate a new file, and insert
+a new hash/record. Revocation is immediate for sessions and Bearer validation:
+
+```sh
+npx wrangler d1 execute furniture-center-preview --remote --env preview --command \
+  "UPDATE access_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE label = 'preview-browser-viewer' AND revoked_at IS NULL"
+```
+
+Preview credentials, hashes, D1 IDs, and Worker Secrets are never production
+credentials. Future production issuance must use a separately generated,
+separately stored local file and newly inserted production D1 records after the
+preview gate passes.
 
 ## Verification and rollback
 

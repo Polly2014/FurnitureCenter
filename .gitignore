@@ -1,4 +1,5 @@
 .env
+.env.preview-credentials.local
 .venv/
 *.db
 *.sqlite3
