@@ -15,8 +15,30 @@ def make_workbook(path: Path) -> None:
     sheet.title = "BJW"
     sheet.append(["复用家具台账"])
     sheet.append(["类别", "家具类别（中/英）", "尺寸", "颜色", "材质", "图片", "品牌", " 数量"])
-    sheet.append(["扶手椅和沙发", "工位椅-Zody", "700*700*1000", "黑色", "布艺 / 金属", "#VALUE!", "Haworth", 40])
-    sheet.append([None, "会议椅 / Conference Chair", "600*600*750", "黑色", "布艺 / 金属", "有图片", "-", 4])
+    sheet.append(
+        [
+            "扶手椅和沙发",
+            "工位椅-Zody",
+            "700*700*1000",
+            "黑色",
+            "布艺 / 金属",
+            "#VALUE!",
+            "Haworth",
+            40,
+        ]
+    )
+    sheet.append(
+        [
+            None,
+            "会议椅 / Conference Chair",
+            "600*600*750",
+            "黑色",
+            "布艺 / 金属",
+            "有图片",
+            "-",
+            4,
+        ]
+    )
     workbook.save(path)
 
 

@@ -42,13 +42,25 @@ def seed_demo_data(session: Session) -> None:
                 alt_text="灰色弧背会议椅", is_primary=True,
             )],
             inventory=[
-                InventoryRecord(id="inventory-arc-bj", site=beijing, quantity_total=18, quantity_available=12),
-                InventoryRecord(id="inventory-arc-sh", site=shanghai, quantity_total=8, quantity_available=4),
+                InventoryRecord(
+                    id="inventory-arc-bj",
+                    site=beijing,
+                    quantity_total=18,
+                    quantity_available=12,
+                ),
+                InventoryRecord(
+                    id="inventory-arc-sh",
+                    site=shanghai,
+                    quantity_total=8,
+                    quantity_available=4,
+                ),
             ],
         ),
         FurnitureRecord(
             id="furniture-oak-table", sku="TBL-OAK-06", name="橡木协作桌",
-            category=tables, description="六人位实木桌面，可用于项目讨论与共享办公。", condition="excellent",
+            category=tables,
+            description="六人位实木桌面，可用于项目讨论与共享办公。",
+            condition="excellent",
             name_en="Oak Collaboration Table", main_category="桌类",
             dimensions="1800*900*750", color="原木色", material="木质 / 金属", brand="",
             images=[ImageRecord(

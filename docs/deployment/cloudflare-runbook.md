@@ -1,5 +1,9 @@
 # 家具共享平台 Cloudflare deployment runbook
 
+> Production 资源创建、Cloudflare 配置审计、`fc.polly.wang` Custom Domain
+> 切换、独立 Token 治理和 Definition of Done 见
+> [Cloudflare Production 与域名切换 Goal](../plans/2026-09-01-cloudflare-production-domain-cutover-goal.md)。
+
 This runbook keeps preview and production physically separate.  Never bind an
 environment to the other's D1 database, R2 bucket, token records, or secrets.
 All token plaintext and Worker Secret values stay out of source, terminal
@@ -38,6 +42,12 @@ admin, viewer, and MCP credentials. Production remains intentionally untouched;
 passing Preview does not itself authorize production resources or the
 `fc.polly.wang` binding.
 
+The production candidate is now regenerated from the clean V2 local database and
+documented in [Production data manifest](production-data-manifest.md). Do not use the
+historical `real-export-20260901-controller` package for Production: it predates the V2
+export contract even though migration defaults made it sufficient for the original
+Preview bootstrap.
+
 ## Preview provisioning and deployment
 
 Run from `worker/` after `npm install` and a fresh frontend build:
@@ -56,7 +66,7 @@ npx wrangler deploy --env preview
 ```
 
 Apply migrations in filename order and confirm 0007 is listed before importing any
-V2 SQLite export. The exporter includes `sites.is_active/version/timestamps`,
+new V2 SQLite export. The current exporter includes `sites.is_active/version/timestamps`,
 `inventory.status/closed_at/closed_reason`, and immutable `transfer_records`; it never
 exports access-token rows. If imported transfer records reference actor token IDs,
 create the matching target D1 token records from separately issued hashes before the
@@ -224,3 +234,18 @@ delta/reconciliation, deploy the proven Worker version, attach
 previous production version for rollback.
 
 Never reuse preview D1/R2 resources, token records, or secrets in production.
+
+## Preview retirement after Production acceptance
+
+The user conditionally authorized retirement of exactly the Preview Worker
+`furniture-center-preview`, D1 `furniture-center-preview`, and R2
+`furniture-center-images-preview`. Do not delete them merely because Phase 1 storage or
+schema checks pass. Retirement is allowed only after the complete Production smoke gate,
+the minimum 30-minute stable observation, and verified Worker/D1/R2 recovery evidence.
+
+Immediately before deletion, create and verify a fresh ignored mode-`0600` Preview D1
+export plus a complete local R2 object package/manifest. Prove Production bindings and
+`fc.polly.wang` have no reference to the Preview resource IDs. Delete in the order Worker,
+D1, then R2, rerunning Production health checks after each step. Stop on the first failure.
+This authorization does not cover any User/Account API Token, Tunnel, other Worker,
+Pages project, token record, or local credential file.
