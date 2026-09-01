@@ -11,6 +11,9 @@ export type InventoryRow = {
   quantity_total: number
   quantity_available: number
   version: number
+  status: 'active' | 'allocated' | 'withdrawn'
+  closed_at: string | null
+  closed_reason: string | null
 }
 
 export type InventorySnapshot = {
@@ -28,6 +31,44 @@ type IdempotentFields = {
 
 type PersistedAdjustCommand = AdjustInventoryCommand & IdempotentFields
 type PersistedTransferCommand = TransferInventoryCommand & IdempotentFields
+
+export type TransferRecord = {
+  id: string
+  furniture_id: string
+  furniture_sku: string
+  furniture_name: string
+  source_inventory_id: string
+  source_site_id: string
+  source_site_code_snapshot: string
+  source_site_name_snapshot: string
+  destination_site_id: string
+  destination_site_code_snapshot: string
+  destination_site_name_snapshot: string
+  listed_quantity_before: number
+  transferred_quantity: number
+  unlisted_remainder: number
+  reason: string
+  actor_token_id: string
+  actor_label_snapshot: string
+  created_at: string
+}
+
+export type TransferListFilters = {
+  furnitureId: string | null
+  sourceSiteId: string | null
+  destinationSiteId: string | null
+  from: string | null
+  to: string | null
+  cursor: { createdAt: string; id: string } | null
+  limit: number
+}
+
+type SiteSnapshot = {
+  id: string
+  code: string
+  name: string
+  is_active: number
+}
 
 export type IdempotencyRecord = {
   request_hash: string
@@ -57,10 +98,24 @@ export class D1InventoryRepository {
     return Boolean(await this.database.prepare('SELECT 1 FROM sites WHERE id = ?').bind(id).first())
   }
 
+  site(id: string) {
+    return this.database.prepare(
+      'SELECT id, code, name, is_active FROM sites WHERE id = ?',
+    ).bind(id).first<SiteSnapshot>()
+  }
+
+  async tokenLabel(id: string) {
+    const row = await this.database.prepare(
+      'SELECT label FROM access_tokens WHERE id = ?',
+    ).bind(id).first<{ label: string }>()
+    return row?.label ?? id
+  }
+
   position(id: string) {
     return this.database
       .prepare(
-        `SELECT id, furniture_id, site_id, quantity_total, quantity_available, version
+        `SELECT id, furniture_id, site_id, quantity_total, quantity_available, version,
+                status, closed_at, closed_reason
          FROM inventory WHERE id = ?`,
       )
       .bind(id)
@@ -70,7 +125,8 @@ export class D1InventoryRepository {
   positionForSite(furnitureId: string, siteId: string) {
     return this.database
       .prepare(
-        `SELECT id, furniture_id, site_id, quantity_total, quantity_available, version
+        `SELECT id, furniture_id, site_id, quantity_total, quantity_available, version,
+                status, closed_at, closed_reason
          FROM inventory WHERE furniture_id = ? AND site_id = ?`,
       )
       .bind(furnitureId, siteId)
@@ -195,36 +251,46 @@ export class D1InventoryRepository {
     return response
   }
 
-  async transfer(
-    command: PersistedTransferCommand,
-    source: InventoryRow,
-    destination: InventoryRow | null,
-  ) {
+  async transfer(command: PersistedTransferCommand, source: InventoryRow) {
     const transferId = crypto.randomUUID()
-    const destinationId = destination?.id ?? crypto.randomUUID()
-    const destinationTotalBefore = destination?.quantity_total ?? 0
-    const destinationAvailableBefore = destination?.quantity_available ?? 0
-    const destinationVersion = destination?.version ?? 0
-    const sourceTotalAfter = source.quantity_total - command.quantity
-    const sourceAvailableAfter = source.quantity_available - command.quantity
-    const destinationTotalAfter = destinationTotalBefore + command.quantity
-    const destinationAvailableAfter = destinationAvailableBefore + command.quantity
+    const createdAt = new Date().toISOString()
+    const [sourceSite, destinationSite, actorLabel] = await Promise.all([
+      this.site(source.site_id),
+      this.site(command.destinationSiteId),
+      this.tokenLabel(command.tokenId),
+    ])
+    if (!sourceSite || !destinationSite) throw new Error('transfer site snapshot is unavailable')
+    const transfer: Omit<TransferRecord, 'furniture_sku' | 'furniture_name'> = {
+      id: transferId,
+      furniture_id: source.furniture_id,
+      source_inventory_id: source.id,
+      source_site_id: sourceSite.id,
+      source_site_code_snapshot: sourceSite.code,
+      source_site_name_snapshot: sourceSite.name,
+      destination_site_id: destinationSite.id,
+      destination_site_code_snapshot: destinationSite.code,
+      destination_site_name_snapshot: destinationSite.name,
+      listed_quantity_before: source.quantity_available,
+      transferred_quantity: command.quantity,
+      unlisted_remainder: source.quantity_available - command.quantity,
+      reason: command.reason,
+      actor_token_id: command.tokenId,
+      actor_label_snapshot: actorLabel,
+      created_at: createdAt,
+    }
     const response = {
-      transfer_id: transferId,
+      transfer,
       source: {
         inventory_id: source.id,
-        quantity_total: sourceTotalAfter,
-        quantity_available: sourceAvailableAfter,
+        quantity_total: source.quantity_total,
+        quantity_available: 0,
         version: source.version + 1,
-      },
-      destination: {
-        inventory_id: destinationId,
-        quantity_total: destinationTotalAfter,
-        quantity_available: destinationAvailableAfter,
-        version: destinationVersion + 1,
+        status: 'allocated' as const,
+        closed_at: createdAt,
+        closed_reason: 'transferred',
       },
     }
-    const statements: D1PreparedStatement[] = [
+    await this.database.batch([
       this.idempotencyStatement(
         command.tokenId,
         command.operation,
@@ -233,77 +299,63 @@ export class D1InventoryRepository {
         200,
         response,
       ),
-      this.database
-        .prepare(
-          `UPDATE inventory
-           SET quantity_total = ?, quantity_available = ?, version = version + 1
-           WHERE id = ? AND version = ?`,
-        )
-        .bind(
-          sourceTotalAfter,
-          sourceAvailableAfter,
-          source.id,
-          command.expectedSourceVersion,
-        ),
+      this.database.prepare(
+        `UPDATE inventory
+         SET quantity_available = 0, status = 'allocated', closed_at = ?,
+             closed_reason = 'transferred', version = version + 1
+         WHERE id = ? AND version = ? AND status = 'active'
+           AND quantity_available = ?
+           AND EXISTS (
+             SELECT 1 FROM sites
+             WHERE id = ? AND is_active = 1
+           )`,
+      ).bind(
+        createdAt,
+        source.id,
+        command.expectedSourceVersion,
+        source.quantity_available,
+        command.destinationSiteId,
+      ),
+      this.database.prepare(
+        `INSERT INTO transfer_records
+          (id, furniture_id, source_inventory_id,
+           source_site_id, source_site_code_snapshot, source_site_name_snapshot,
+           destination_site_id, destination_site_code_snapshot, destination_site_name_snapshot,
+           listed_quantity_before, transferred_quantity, unlisted_remainder,
+           reason, actor_token_id, actor_label_snapshot, created_at)
+         VALUES (?, ?, CASE WHEN changes() = 1 THEN ? ELSE NULL END,
+                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(
+        transfer.id,
+        transfer.furniture_id,
+        transfer.source_inventory_id,
+        transfer.source_site_id,
+        transfer.source_site_code_snapshot,
+        transfer.source_site_name_snapshot,
+        transfer.destination_site_id,
+        transfer.destination_site_code_snapshot,
+        transfer.destination_site_name_snapshot,
+        transfer.listed_quantity_before,
+        transfer.transferred_quantity,
+        transfer.unlisted_remainder,
+        transfer.reason,
+        transfer.actor_token_id,
+        transfer.actor_label_snapshot,
+        transfer.created_at,
+      ),
       this.adjustment(
         source.id,
-        'transfer_out',
-        -command.quantity,
+        'allocation_close',
+        0,
+        -source.quantity_available,
         source.quantity_total,
-        sourceTotalAfter,
+        source.quantity_total,
         source.quantity_available,
-        sourceAvailableAfter,
+        0,
         transferId,
         command.reason,
         command.actor,
-        true,
-      ),
-    ]
-    if (destination) {
-      statements.push(
-        this.database
-          .prepare(
-            `UPDATE inventory
-             SET quantity_total = ?, quantity_available = ?, version = version + 1
-             WHERE id = ? AND version = ?`,
-          )
-          .bind(
-            destinationTotalAfter,
-            destinationAvailableAfter,
-            destination.id,
-            destination.version,
-          ),
-      )
-    } else {
-      statements.push(
-        this.database
-          .prepare(
-            `INSERT INTO inventory
-              (id, furniture_id, site_id, quantity_total, quantity_available, version)
-             VALUES (?, ?, ?, ?, ?, 1)`,
-          )
-          .bind(
-            destinationId,
-            source.furniture_id,
-            command.destinationSiteId,
-            destinationTotalAfter,
-            destinationAvailableAfter,
-          ),
-      )
-    }
-    statements.push(
-      this.adjustment(
-        destinationId,
-        'transfer_in',
-        command.quantity,
-        destinationTotalBefore,
-        destinationTotalAfter,
-        destinationAvailableBefore,
-        destinationAvailableAfter,
-        transferId,
-        command.reason,
-        command.actor,
-        true,
+        false,
       ),
       this.audit(
         'inventory_transfer',
@@ -312,14 +364,61 @@ export class D1InventoryRepository {
         command.actor,
         {
           source_inventory_id: source.id,
-          destination_inventory_id: destinationId,
-          quantity: command.quantity,
+          source_site_id: source.site_id,
+          destination_site_id: command.destinationSiteId,
+          listed_quantity_before: source.quantity_available,
+          transferred_quantity: command.quantity,
+          unlisted_remainder: source.quantity_available - command.quantity,
           reason: command.reason,
         },
       ),
-    )
-    await this.database.batch(statements)
+    ])
     return response
+  }
+
+  async listTransfers(filters: TransferListFilters) {
+    const where: string[] = []
+    const bindings: Array<string | number> = []
+    if (filters.furnitureId) {
+      where.push('t.furniture_id = ?')
+      bindings.push(filters.furnitureId)
+    }
+    if (filters.sourceSiteId) {
+      where.push('t.source_site_id = ?')
+      bindings.push(filters.sourceSiteId)
+    }
+    if (filters.destinationSiteId) {
+      where.push('t.destination_site_id = ?')
+      bindings.push(filters.destinationSiteId)
+    }
+    if (filters.from) {
+      where.push('t.created_at >= ?')
+      bindings.push(filters.from)
+    }
+    if (filters.to) {
+      where.push('t.created_at <= ?')
+      bindings.push(filters.to)
+    }
+    if (filters.cursor) {
+      where.push('(t.created_at < ? OR (t.created_at = ? AND t.id < ?))')
+      bindings.push(filters.cursor.createdAt, filters.cursor.createdAt, filters.cursor.id)
+    }
+    const whereClause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''
+    const rows = await this.database.prepare(
+      `SELECT t.id, t.furniture_id, f.sku AS furniture_sku, f.name AS furniture_name,
+              t.source_inventory_id, t.source_site_id,
+              t.source_site_code_snapshot, t.source_site_name_snapshot,
+              t.destination_site_id, t.destination_site_code_snapshot,
+              t.destination_site_name_snapshot, t.listed_quantity_before,
+              t.transferred_quantity, t.unlisted_remainder, t.reason,
+              t.actor_token_id, t.actor_label_snapshot, t.created_at
+       FROM transfer_records t
+       JOIN furniture f ON f.id = t.furniture_id
+       ${whereClause}
+       ORDER BY t.created_at DESC, t.id DESC
+       LIMIT ?`,
+    ).bind(...bindings, filters.limit + 1).all<TransferRecord>()
+    return rows.results
   }
 
   private idempotencyStatement(
@@ -350,7 +449,8 @@ export class D1InventoryRepository {
   private adjustment(
     inventoryId: string,
     kind: string,
-    delta: number,
+    deltaTotal: number,
+    deltaAvailable: number,
     totalBefore: number,
     totalAfter: number,
     availableBefore: number,
@@ -376,8 +476,8 @@ export class D1InventoryRepository {
         crypto.randomUUID(),
         inventoryId,
         kind,
-        delta,
-        delta,
+        deltaTotal,
+        deltaAvailable,
         totalBefore,
         totalAfter,
         availableBefore,

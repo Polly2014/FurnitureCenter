@@ -115,8 +115,17 @@ describe('D1 inventory commands', () => {
     ).toEqual({ count: 0 })
   })
 
-  it('atomically transfers stock to an existing site with paired audit facts', async () => {
+  it('atomically closes the whole shared listing, leaves the destination unchanged and records 10/3/7', async () => {
     const admin = await browserAuth('admin')
+    await env.DB.prepare(
+      `UPDATE inventory
+       SET quantity_total = 10, quantity_available = 10
+       WHERE id = 'inventory-arc-bj'`,
+    ).run()
+    const destinationBefore = await env.DB.prepare(
+      `SELECT id, quantity_total, quantity_available, version, status
+       FROM inventory WHERE id = 'inventory-arc-sh'`,
+    ).first()
     const response = await SELF.fetch(
       'https://fc.test/api/admin/inventory/inventory-arc-bj/transfers',
       {
@@ -128,32 +137,51 @@ describe('D1 inventory commands', () => {
         },
         body: JSON.stringify({
           destination_site_id: 'site-shanghai',
-          quantity: 2,
-          reason: '上海培训活动调拨',
+          quantity: 3,
+          reason: '上海园区会议室领取',
           expected_source_version: 1,
-          expected_destination_version: 1,
         }),
       },
     )
 
     expect(response.status).toBe(200)
     const payload = await response.json<{
-      transfer_id: string
+      transfer: Record<string, unknown>
       source: Record<string, unknown>
-      destination: Record<string, unknown>
     }>()
     expect(payload.source).toEqual({
       inventory_id: 'inventory-arc-bj',
-      quantity_total: 16,
-      quantity_available: 10,
-      version: 2,
-    })
-    expect(payload.destination).toEqual({
-      inventory_id: 'inventory-arc-sh',
       quantity_total: 10,
-      quantity_available: 6,
+      quantity_available: 0,
       version: 2,
+      status: 'allocated',
+      closed_at: expect.any(String),
+      closed_reason: 'transferred',
     })
+    expect(payload.transfer).toMatchObject({
+      furniture_id: 'furniture-arc-chair',
+      source_inventory_id: 'inventory-arc-bj',
+      source_site_id: 'site-beijing',
+      source_site_code_snapshot: 'BJ',
+      source_site_name_snapshot: '北京园区',
+      destination_site_id: 'site-shanghai',
+      destination_site_code_snapshot: 'SH',
+      destination_site_name_snapshot: '上海园区',
+      listed_quantity_before: 10,
+      transferred_quantity: 3,
+      unlisted_remainder: 7,
+      reason: '上海园区会议室领取',
+      actor_token_id: 'token-admin',
+      actor_label_snapshot: 'admin contract',
+      created_at: expect.any(String),
+    })
+    expect(
+      await env.DB.prepare(
+        `SELECT id, quantity_total, quantity_available, version, status
+         FROM inventory WHERE id = 'inventory-arc-sh'`,
+      ).first(),
+    ).toEqual(destinationBefore)
+
     const replay = await SELF.fetch(
       'https://fc.test/api/admin/inventory/inventory-arc-bj/transfers',
       {
@@ -165,46 +193,35 @@ describe('D1 inventory commands', () => {
         },
         body: JSON.stringify({
           destination_site_id: 'site-shanghai',
-          quantity: 2,
-          reason: '上海培训活动调拨',
+          quantity: 3,
+          reason: '上海园区会议室领取',
           expected_source_version: 1,
-          expected_destination_version: 1,
         }),
       },
     )
     expect(replay.status).toBe(200)
     expect(await replay.json()).toEqual(payload)
-    const adjustments = await env.DB.prepare(
+    const adjustment = await env.DB.prepare(
       `SELECT kind, delta_total, delta_available, quantity_total_before,
               quantity_total_after, quantity_available_before,
               quantity_available_after, transfer_id
-       FROM inventory_adjustments ORDER BY kind`,
-    ).all()
-    expect(adjustments.results).toEqual([
-      {
-        kind: 'transfer_in',
-        delta_total: 2,
-        delta_available: 2,
-        quantity_total_before: 8,
-        quantity_total_after: 10,
-        quantity_available_before: 4,
-        quantity_available_after: 6,
-        transfer_id: payload.transfer_id,
-      },
-      {
-        kind: 'transfer_out',
-        delta_total: -2,
-        delta_available: -2,
-        quantity_total_before: 18,
-        quantity_total_after: 16,
-        quantity_available_before: 12,
-        quantity_available_after: 10,
-        transfer_id: payload.transfer_id,
-      },
-    ])
+       FROM inventory_adjustments`,
+    ).first()
+    expect(adjustment).toEqual({
+      kind: 'allocation_close',
+      delta_total: 0,
+      delta_available: -10,
+      quantity_total_before: 10,
+      quantity_total_after: 10,
+      quantity_available_before: 10,
+      quantity_available_after: 0,
+      transfer_id: payload.transfer.id,
+    })
+    expect(await env.DB.prepare('SELECT COUNT(*) AS count FROM transfer_records').first())
+      .toEqual({ count: 1 })
   })
 
-  it('creates a missing destination and rolls back every failed transfer', async () => {
+  it('never creates a missing destination listing and rolls back every invalid transfer', async () => {
     const admin = await browserAuth('admin')
     const rejected = await SELF.fetch(
       'https://fc.test/api/admin/inventory/inventory-arc-bj/transfers',
@@ -220,7 +237,6 @@ describe('D1 inventory commands', () => {
           quantity: 13,
           reason: '超过北京可用库存',
           expected_source_version: 1,
-          expected_destination_version: 1,
         }),
       },
     )
@@ -251,15 +267,146 @@ describe('D1 inventory commands', () => {
           quantity: 2,
           reason: '深圳培训活动调拨',
           expected_source_version: 1,
-          expected_destination_version: null,
         }),
       },
     )
     expect(created.status).toBe(200)
     expect(await created.json()).toMatchObject({
-      source: { quantity_total: 16, quantity_available: 10, version: 2 },
-      destination: { quantity_total: 2, quantity_available: 2, version: 1 },
+      source: {
+        quantity_total: 18,
+        quantity_available: 0,
+        version: 2,
+        status: 'allocated',
+      },
     })
+    expect(
+      await env.DB.prepare(
+        `SELECT COUNT(*) AS count FROM inventory
+         WHERE furniture_id = 'furniture-arc-chair' AND site_id = 'site-shenzhen'`,
+      ).first(),
+    ).toEqual({ count: 0 })
+  })
+
+  it('rejects inactive destinations and closed source listings without partial writes', async () => {
+    const admin = await browserAuth('admin')
+    await env.DB.prepare(
+      `UPDATE sites SET is_active = 0 WHERE id = 'site-shenzhen'`,
+    ).run()
+    const inactive = await SELF.fetch(
+      'https://fc.test/api/admin/inventory/inventory-arc-bj/transfers',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'transfer-inactive-0001',
+          ...admin.headers,
+        },
+        body: JSON.stringify({
+          destination_site_id: 'site-shenzhen',
+          quantity: 2,
+          reason: '停用园区不应接收',
+          expected_source_version: 1,
+        }),
+      },
+    )
+    expect(inactive.status).toBe(422)
+
+    await env.DB.prepare(
+      `UPDATE inventory
+       SET quantity_available = 0, status = 'allocated', closed_reason = 'transferred'
+       WHERE id = 'inventory-arc-bj'`,
+    ).run()
+    const closed = await SELF.fetch(
+      'https://fc.test/api/admin/inventory/inventory-arc-bj/transfers',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'transfer-closed-0001',
+          ...admin.headers,
+        },
+        body: JSON.stringify({
+          destination_site_id: 'site-shanghai',
+          quantity: 1,
+          reason: '重复领取已关闭批次',
+          expected_source_version: 1,
+        }),
+      },
+    )
+    expect(closed.status).toBe(409)
+    expect(await env.DB.prepare('SELECT COUNT(*) AS count FROM transfer_records').first())
+      .toEqual({ count: 0 })
+    expect(await env.DB.prepare('SELECT COUNT(*) AS count FROM inventory_adjustments').first())
+      .toEqual({ count: 0 })
+  })
+
+  it('lists immutable transfer records with admin-only filters and cursor pagination', async () => {
+    const admin = await browserAuth('admin')
+    const transfer = (sourceId: string, destinationSiteId: string, key: string) =>
+      SELF.fetch(`https://fc.test/api/admin/inventory/${sourceId}/transfers`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': key,
+          ...admin.headers,
+        },
+        body: JSON.stringify({
+          destination_site_id: destinationSiteId,
+          quantity: 1,
+          reason: `领取 ${key}`,
+          expected_source_version: 1,
+        }),
+      })
+    expect((await transfer('inventory-arc-bj', 'site-shanghai', 'history-arc-0001')).status)
+      .toBe(200)
+    expect((await transfer('inventory-oak-sh', 'site-shenzhen', 'history-oak-0001')).status)
+      .toBe(200)
+
+    const firstPage = await SELF.fetch('https://fc.test/api/admin/transfers?limit=1', {
+      headers: { Cookie: admin.cookie },
+    })
+    expect(firstPage.status).toBe(200)
+    const firstPayload = await firstPage.json<{
+      items: Array<{ id: string }>
+      next_cursor: string | null
+    }>()
+    expect(firstPayload.items).toHaveLength(1)
+    expect(firstPayload.next_cursor).toEqual(expect.any(String))
+
+    const secondPage = await SELF.fetch(
+      `https://fc.test/api/admin/transfers?limit=1&cursor=${encodeURIComponent(firstPayload.next_cursor!)}`,
+      { headers: { Cookie: admin.cookie } },
+    )
+    const secondPayload = await secondPage.json<{
+      items: Array<{ id: string }>
+      next_cursor: string | null
+    }>()
+    expect(secondPayload.items).toHaveLength(1)
+    expect(secondPayload.items[0].id).not.toBe(firstPayload.items[0].id)
+
+    const filtered = await SELF.fetch(
+      'https://fc.test/api/admin/transfers?source_site_id=site-beijing&destination_site_id=site-shanghai',
+      { headers: { Cookie: admin.cookie } },
+    )
+    const filteredPayload = await filtered.json<{ items: Array<{ furniture_id: string }> }>()
+    expect(filteredPayload.items).toEqual([
+      expect.objectContaining({ furniture_id: 'furniture-arc-chair' }),
+    ])
+
+    const viewer = await browserAuth('viewer')
+    expect((await SELF.fetch('https://fc.test/api/admin/transfers', {
+      headers: { Cookie: viewer.cookie },
+    })).status).toBe(403)
+
+    const recordId = firstPayload.items[0].id
+    await expect(
+      env.DB.prepare('UPDATE transfer_records SET reason = ? WHERE id = ?')
+        .bind('试图篡改', recordId)
+        .run(),
+    ).rejects.toThrow('transfer records are immutable')
+    await expect(
+      env.DB.prepare('DELETE FROM transfer_records WHERE id = ?').bind(recordId).run(),
+    ).rejects.toThrow('transfer records are immutable')
   })
 
   it('creates one site position and rejects duplicates', async () => {
@@ -344,15 +491,13 @@ describe('D1 inventory commands', () => {
     expect(conflicting.status).toBe(409)
   })
 
-  it('rolls back the source when the destination changes after the service preflight', async () => {
+  it('rolls back all transfer facts when the source changes after service preflight', async () => {
     const repository = new D1InventoryRepository(env.DB)
     const source = await repository.position('inventory-arc-bj')
-    const destination = await repository.position('inventory-arc-sh')
     expect(source).not.toBeNull()
-    expect(destination).not.toBeNull()
     await env.DB.prepare(
-      `UPDATE inventory SET quantity_total = 9, quantity_available = 5, version = 2
-       WHERE id = 'inventory-arc-sh'`,
+      `UPDATE inventory SET quantity_total = 19, quantity_available = 13, version = 2
+       WHERE id = 'inventory-arc-bj'`,
     ).run()
 
     await expect(
@@ -369,22 +514,25 @@ describe('D1 inventory commands', () => {
           keyHash: 'concurrent-transfer-key-hash',
           requestHash: 'concurrent-transfer-hash',
           expectedSourceVersion: 1,
-          expectedDestinationVersion: 1,
         },
         source!,
-        destination!,
       ),
     ).rejects.toThrow()
 
     expect(
       await env.DB.prepare(
-        `SELECT id, quantity_total, quantity_available, version FROM inventory
-         WHERE id IN ('inventory-arc-bj', 'inventory-arc-sh') ORDER BY id`,
+        `SELECT id, quantity_total, quantity_available, version, status FROM inventory
+         WHERE id = 'inventory-arc-bj'`,
       ).all(),
     ).toMatchObject({
       results: [
-        { id: 'inventory-arc-bj', quantity_total: 18, quantity_available: 12, version: 1 },
-        { id: 'inventory-arc-sh', quantity_total: 9, quantity_available: 5, version: 2 },
+        {
+          id: 'inventory-arc-bj',
+          quantity_total: 19,
+          quantity_available: 13,
+          version: 2,
+          status: 'active',
+        },
       ],
     })
     expect(
@@ -392,6 +540,9 @@ describe('D1 inventory commands', () => {
     ).toEqual({ count: 0 })
     expect(
       await env.DB.prepare('SELECT COUNT(*) AS count FROM idempotency_records').first(),
+    ).toEqual({ count: 0 })
+    expect(
+      await env.DB.prepare('SELECT COUNT(*) AS count FROM transfer_records').first(),
     ).toEqual({ count: 0 })
   })
 })

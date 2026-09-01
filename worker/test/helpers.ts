@@ -15,6 +15,8 @@ async function sha256(value: string) {
 
 export async function resetDatabase() {
   await applyD1Migrations(env.DB, env.TEST_MIGRATIONS)
+  await env.DB.prepare('DROP TRIGGER IF EXISTS transfer_records_immutable_update').run()
+  await env.DB.prepare('DROP TRIGGER IF EXISTS transfer_records_immutable_delete').run()
   for (const table of [
     'mcp_daily_usage',
     'chat_daily_usage',
@@ -22,11 +24,11 @@ export async function resetDatabase() {
     'image_cleanup_jobs',
     'image_uploads',
     'idempotency_records',
+    'transfer_records',
     'sessions',
     'access_tokens',
     'audit_events',
     'inventory_adjustments',
-    'transfer_records',
     'inventory',
     'furniture_images',
     'furniture',
@@ -44,6 +46,20 @@ export async function resetDatabase() {
   if (objects.objects.length > 0) {
     await env.IMAGES.delete(objects.objects.map((object) => object.key))
   }
+  await env.DB.prepare(
+    `CREATE TRIGGER transfer_records_immutable_update
+     BEFORE UPDATE ON transfer_records
+     BEGIN
+       SELECT RAISE(ABORT, 'transfer records are immutable');
+     END`,
+  ).run()
+  await env.DB.prepare(
+    `CREATE TRIGGER transfer_records_immutable_delete
+     BEFORE DELETE ON transfer_records
+     BEGIN
+       SELECT RAISE(ABORT, 'transfer records are immutable');
+     END`,
+  ).run()
 }
 
 export async function seedContractCatalog() {

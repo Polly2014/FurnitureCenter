@@ -1,6 +1,10 @@
 import { ApplicationError } from '../catalog/models'
 import { sha256Hex } from '../auth/tokens'
-import { D1InventoryRepository, type InventorySnapshot } from './repository'
+import {
+  D1InventoryRepository,
+  type InventorySnapshot,
+  type TransferListFilters,
+} from './repository'
 
 type IdempotencyContext = {
   tokenId: string
@@ -32,7 +36,6 @@ export type TransferInventoryCommand = IdempotencyContext & {
   reason: string
   actor: string
   expectedSourceVersion: number
-  expectedDestinationVersion: number | null
 }
 
 export class InventoryService {
@@ -119,12 +122,6 @@ export class InventoryService {
     if (!Number.isInteger(command.expectedSourceVersion) || command.expectedSourceVersion < 1) {
       throw new ApplicationError(422, 'expected source version must be positive')
     }
-    if (
-      command.expectedDestinationVersion !== null
-      && (!Number.isInteger(command.expectedDestinationVersion) || command.expectedDestinationVersion < 1)
-    ) {
-      throw new ApplicationError(422, 'expected destination version must be positive')
-    }
     const operation = `inventory-transfer:${command.sourceInventoryId}`
     const keyHash = await sha256Hex(command.idempotencyKey)
     const requestHash = await sha256Hex(JSON.stringify({
@@ -133,7 +130,6 @@ export class InventoryService {
       quantity: command.quantity,
       reason: command.reason,
       expected_source_version: command.expectedSourceVersion,
-      expected_destination_version: command.expectedDestinationVersion,
     }))
     const replay = await this.replay<Awaited<ReturnType<D1InventoryRepository['transfer']>>>(
       command.tokenId,
@@ -146,8 +142,12 @@ export class InventoryService {
     if (!source) {
       throw new ApplicationError(404, `Inventory position not found: ${command.sourceInventoryId}`)
     }
-    if (!(await this.repository.siteExists(command.destinationSiteId))) {
+    const destinationSite = await this.repository.site(command.destinationSiteId)
+    if (!destinationSite) {
       throw new ApplicationError(404, `Site not found: ${command.destinationSiteId}`)
+    }
+    if (destinationSite.is_active !== 1) {
+      throw new ApplicationError(422, 'destination site is inactive')
     }
     if (source.site_id === command.destinationSiteId) {
       throw new ApplicationError(422, 'source and destination sites must be different')
@@ -155,28 +155,16 @@ export class InventoryService {
     if (source.version !== command.expectedSourceVersion) {
       throw new ApplicationError(409, 'inventory position changed; refresh and retry')
     }
-    if (source.quantity_total < command.quantity || source.quantity_available < command.quantity) {
-      throw new ApplicationError(422, 'transfer quantity exceeds available physical stock')
+    if (source.status !== 'active') {
+      throw new ApplicationError(409, 'shared listing is already closed')
     }
-    const destination = await this.repository.positionForSite(
-      source.furniture_id,
-      command.destinationSiteId,
-    )
-    if (destination) {
-      if (
-        command.expectedDestinationVersion === null
-        || destination.version !== command.expectedDestinationVersion
-      ) {
-        throw new ApplicationError(409, 'inventory position changed; refresh and retry')
-      }
-    } else if (command.expectedDestinationVersion !== null) {
-      throw new ApplicationError(409, 'destination inventory position changed; refresh and retry')
+    if (source.quantity_available < command.quantity) {
+      throw new ApplicationError(422, 'transfer quantity exceeds available shared quantity')
     }
     try {
       return await this.repository.transfer(
         { ...command, operation, keyHash, requestHash },
         source,
-        destination,
       )
     } catch {
       const concurrentReplay = await this.replay<
@@ -184,6 +172,45 @@ export class InventoryService {
       >(command.tokenId, operation, keyHash, requestHash)
       if (concurrentReplay) return concurrentReplay
       throw new ApplicationError(409, 'inventory position changed; refresh and retry')
+    }
+  }
+
+  async listTransfers(options: {
+    furnitureId?: string
+    sourceSiteId?: string
+    destinationSiteId?: string
+    from?: string
+    to?: string
+    cursor?: string
+    limit?: number
+  }) {
+    const limit = options.limit ?? 50
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+      throw new ApplicationError(422, 'limit must be between 1 and 100')
+    }
+    const from = this.optionalDate(options.from, 'from')
+    const to = this.optionalDate(options.to, 'to')
+    if (from && to && from > to) {
+      throw new ApplicationError(422, 'from must not be later than to')
+    }
+    const filters: TransferListFilters = {
+      furnitureId: options.furnitureId?.trim() || null,
+      sourceSiteId: options.sourceSiteId?.trim() || null,
+      destinationSiteId: options.destinationSiteId?.trim() || null,
+      from,
+      to,
+      cursor: this.decodeCursor(options.cursor),
+      limit,
+    }
+    const rows = await this.repository.listTransfers(filters)
+    const hasMore = rows.length > limit
+    const items = rows.slice(0, limit)
+    const last = items.at(-1)
+    return {
+      items,
+      next_cursor: hasMore && last
+        ? btoa(`${last.created_at}|${last.id}`)
+        : null,
     }
   }
 
@@ -218,6 +245,30 @@ export class InventoryService {
     if (total < 0) throw new ApplicationError(422, 'inventory total cannot be negative')
     if (available < 0 || available > total) {
       throw new ApplicationError(422, 'available quantity must be between zero and total')
+    }
+  }
+
+  private optionalDate(value: string | undefined, field: string) {
+    if (!value) return null
+    const timestamp = Date.parse(value)
+    if (!Number.isFinite(timestamp)) {
+      throw new ApplicationError(422, `${field} must be an ISO date or timestamp`)
+    }
+    return new Date(timestamp).toISOString()
+  }
+
+  private decodeCursor(value: string | undefined) {
+    if (!value) return null
+    try {
+      const decoded = atob(value)
+      const separator = decoded.lastIndexOf('|')
+      if (separator < 1) throw new Error('invalid cursor')
+      const createdAt = decoded.slice(0, separator)
+      const id = decoded.slice(separator + 1)
+      if (!id || Number.isNaN(Date.parse(createdAt))) throw new Error('invalid cursor')
+      return { createdAt, id }
+    } catch {
+      throw new ApplicationError(422, 'cursor is invalid')
     }
   }
 }

@@ -28,6 +28,13 @@ function optionalInteger(value: unknown, name: string) {
   return integer(value, name)
 }
 
+function optionalQueryInteger(value: string | undefined, name: string) {
+  if (value === undefined) return undefined
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed)) throw new ApplicationError(422, `${name} must be an integer`)
+  return parsed
+}
+
 function idempotencyKey(context: Context<AuthEnvironment>) {
   const key = context.req.header('Idempotency-Key')?.trim() ?? ''
   if (!key) throw new ApplicationError(422, 'Idempotency-Key is required')
@@ -119,10 +126,6 @@ export function registerInventoryRoutes(app: Hono<AuthEnvironment>) {
               payload.expected_source_version,
               'expected_source_version',
             ),
-            expectedDestinationVersion: optionalInteger(
-              payload.expected_destination_version,
-              'expected_destination_version',
-            ),
           }),
         )
       } catch (error) {
@@ -130,4 +133,22 @@ export function registerInventoryRoutes(app: Hono<AuthEnvironment>) {
       }
     },
   )
+
+  app.get('/api/admin/transfers', requireRole('admin'), async (context) => {
+    try {
+      return context.json(
+        await service(context).listTransfers({
+          furnitureId: context.req.query('furniture_id'),
+          sourceSiteId: context.req.query('source_site_id'),
+          destinationSiteId: context.req.query('destination_site_id'),
+          from: context.req.query('from'),
+          to: context.req.query('to'),
+          cursor: context.req.query('cursor'),
+          limit: optionalQueryInteger(context.req.query('limit'), 'limit'),
+        }),
+      )
+    } catch (error) {
+      return errorResponse(context, error)
+    }
+  })
 }
