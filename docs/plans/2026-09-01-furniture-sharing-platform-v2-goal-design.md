@@ -1,6 +1,6 @@
 # 家具共享平台 V2：园区、调拨下架与品牌统一
 
-> 状态：下一次 Goal 的需求与设计输入。本文件只定义目标、业务语义和验收标准，不代表功能已经实现。
+> 状态：已按本设计完成实现与独立 Cloudflare Preview 验收（2026-09-01）。生产部署与 `fc.polly.wang` 绑定仍需单独授权；真实验收证据见 `docs/deployment/cloudflare-runbook.md`。
 
 ## 1. Goal
 

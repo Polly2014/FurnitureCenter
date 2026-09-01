@@ -1,5 +1,7 @@
 # Furniture Sharing Platform V2 Implementation Plan
 
+> **Status (2026-09-01):** Implemented on `codex/cloudflare-production` and verified in the isolated Cloudflare Preview. The checkboxes below preserve the original test-first execution sequence; authoritative live evidence is recorded in `docs/deployment/cloudflare-runbook.md`. Production deployment and the `fc.polly.wang` binding remain separately gated.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Deliver site administration, immutable allocation history, whole-listing close semantics, and consistent “家具共享平台” branding across the deployed Web, Chat, map, and MCP surfaces.

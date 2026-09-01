@@ -15,18 +15,28 @@ exception is the local, ignored preview credential file described below.
 | URL | `https://furniture-center-preview.26716201.workers.dev` |
 | D1 database | `furniture-center-preview` (`12e00396-5823-4167-ad07-575b6ae977ce`) |
 | R2 bucket | `furniture-center-images-preview` |
-| deployed version | `2b57177b-076e-41a0-bf9e-602d7d68057b` |
+| deployed version | `5cc10639-7683-40dd-8cd0-cade753d042c` |
+| previous rollback version | `bd70ba5e-da75-404e-a562-959ee00f6e75` |
 | MCP host allow-list | `furniture-center-preview.26716201.workers.dev` |
 | Worker Secrets (names only) | `COPILOTX_API_KEY`, `SESSION_SIGNING_KEY` |
 
-The recorded preview checkpoint predates V2 and has migrations 0001-0006 plus the reconciled real catalog:
-3 categories, 3 sites, 4 furniture records, 5 inventory positions, 4 image
-metadata records, and zero audit/adjustment records.  Four JPEG objects were
-uploaded to its private R2 bucket and SHA-256 reconciled.
+The reconciled pre-V2 catalog contained 3 categories, 3 sites, 4 furniture
+records, 5 inventory positions, 4 image metadata records, and zero
+audit/adjustment records. Four JPEG objects were uploaded to the private R2
+bucket and SHA-256 reconciled. Migration `0007_sharing_platform_v2.sql` was
+applied to Preview on 2026-09-01 before version
+`5cc10639-7683-40dd-8cd0-cade753d042c` was deployed. Wrangler currently reports
+no pending Preview migration.
 
-V2 requires applying `0007_sharing_platform_v2.sql` to preview before deployment.
-Preview is not production-ready until separate viewer, admin, and MCP credentials
-complete the authenticated V2 smoke tests below.
+Before applying migration 0007, a private mode-`0600` rollback export was saved
+at `.migration/preview-v2-pre-migration-20260901-1901.sql`. It is ignored by Git
+and its contents must never be printed or committed. Worker rollback does not
+reverse migration 0007 or the authenticated E2E rows described below.
+
+The authenticated V2 smoke gate passed on 2026-09-01 with the separately issued
+admin, viewer, and MCP credentials. Production remains intentionally untouched;
+passing Preview does not itself authorize production resources or the
+`fc.polly.wang` binding.
 
 ## Preview provisioning and deployment
 
@@ -140,6 +150,43 @@ separately stored local file and newly inserted production D1 records after the
 preview gate passes.
 
 ## Verification and rollback
+
+### V2 authenticated Preview evidence (2026-09-01)
+
+The admin browser journey created site `E2E` as “Preview E2E 测试园区”, edited
+it to “Preview E2E 验收园区” at `30.573, 104.067`, and then deactivated it after
+the allocation test. Site version advanced from 1 to 3. Once inactive, it no
+longer appeared in the new-listing site selector, public site filter, or MCP
+`list_sites`; the admin site manager retained it as an inactive historical site.
+
+The journey then published Preview-only listing `E2E-TRANSFER-20260901` with 10
+available units at `E2E` and allocated 3 units to `SH`. The confirmation stated
+that all 10 units would be removed from sharing, Shanghai would not receive
+inventory, and the remaining 7 would not stay listed. Direct D1 verification
+after the operation proved:
+
+- the only inventory row for the test SKU remained at source `E2E` with
+  `quantity_total=10`, `quantity_available=0`, `status=allocated`,
+  `closed_reason=transferred`, and `version=2`;
+- no destination inventory row was created or updated;
+- one immutable record retained source `E2E`, destination `SH`, listed quantity
+  10, transferred quantity 3, unlisted remainder 7, actor label
+  `preview-admin`, the test reason, and its timestamp.
+
+The closed SKU disappeared from the admin shared-item list and public catalog;
+structured search returned zero results, the detail/map context stayed empty,
+and Chat answered that the SKU was not found. The transfer-history UI retained
+the exact `10 / 3 / 7` facts, route, actor, reason, and timestamp after the source
+site was deactivated. Browser diagnostics reported no console log entries during
+the final journey.
+
+The viewer credential successfully created a viewer session but received `403`
+from both `/api/admin/sites` and `/api/admin/transfers`. MCP initialized with
+server name `家具共享平台`, negotiated protocol `2025-11-25`, and exposed only
+`search_furniture`, `get_furniture`, `list_sites`, and `list_categories`; all
+four declared read-only, non-destructive annotations. Searching the closed SKU
+returned count 0 and direct lookup returned `not_found`. No write or transfer
+history tool was exposed.
 
 Unauthenticated checks that do not need a credential:
 
