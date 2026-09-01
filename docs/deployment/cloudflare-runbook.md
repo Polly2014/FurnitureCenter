@@ -69,10 +69,15 @@ MCP client. It writes raw values only to the exact repository-root file
 `.env.preview-credentials.local`, refuses to overwrite it, sets mode `0600`,
 and prints only its path. The CLI deliberately has no output-path override.
 It writes and fsyncs a private same-directory temporary file, then publishes it
-with a no-replacement atomic link; a failure before publication removes the
-temporary artifact and never creates or replaces the final file. That exact
-root-level filename is Git-ignored and must remain untracked; never copy it
-into the main `.env`, a shell command, chat, a report, or a commit.
+with a no-replacement atomic link; handled failures before publication remove
+the temporary artifact and never create or replace the final file. Successful
+runs remove that exact temporary file in `finally`. The generator never scans
+or deletes existing sibling files; an abrupt interruption or failed unlink can
+leave a `0600`, root-ignored `.env.preview-credentials.local.tmp-*` file for a
+trusted operator to remove after confirming its name. Both that private
+temporary-file family and the exact final filename are Git-ignored and must
+remain untracked; never copy either into the main `.env`, a shell command,
+chat, a report, or a commit.
 
 ```sh
 python scripts/generate_preview_credentials.py

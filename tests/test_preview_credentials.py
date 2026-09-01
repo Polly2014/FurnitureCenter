@@ -27,6 +27,12 @@ def parse_dotenv(path: Path) -> dict[str, str]:
     return dict(line.split("=", 1) for line in lines if line)
 
 
+def configure_test_output(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    output = tmp_path / ".env.preview-credentials.local"
+    monkeypatch.setattr(credential_generator, "DEFAULT_OUTPUT", output)
+    return output
+
+
 def test_cli_rejects_an_output_override(tmp_path: Path):
     output = tmp_path / ".env.preview-credentials.local"
 
@@ -46,11 +52,11 @@ def test_cli_rejects_an_output_override(tmp_path: Path):
 
 
 def test_private_generator_writes_three_private_high_entropy_credentials_without_echoing(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ):
-    output = tmp_path / ".env.preview-credentials.local"
+    output = configure_test_output(monkeypatch, tmp_path)
 
-    credential_generator._create_credential_file(output)
+    credential_generator._create_credential_file()
 
     captured = capsys.readouterr()
     assert captured.out == ""
@@ -63,10 +69,22 @@ def test_private_generator_writes_three_private_high_entropy_credentials_without
         encoded = token.removeprefix("ms-fc-")
         assert len(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))) >= 32
     assert os.stat(output).st_mode & 0o777 == 0o600
+    assert list(tmp_path.iterdir()) == [output]
 
 
-def test_private_generator_regenerates_until_all_three_credentials_are_unique(tmp_path: Path):
-    output = tmp_path / ".env.preview-credentials.local"
+def test_private_generator_does_not_accept_an_arbitrary_output_path(tmp_path: Path):
+    arbitrary_output = tmp_path / "unapproved-credential-file"
+
+    with pytest.raises(TypeError):
+        credential_generator._create_credential_file(arbitrary_output)
+
+    assert not arbitrary_output.exists()
+
+
+def test_private_generator_regenerates_until_all_three_credentials_are_unique(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    output = configure_test_output(monkeypatch, tmp_path)
     generated = iter(("duplicate", "duplicate", "viewer", "admin"))
     attempts = 0
 
@@ -75,7 +93,7 @@ def test_private_generator_regenerates_until_all_three_credentials_are_unique(tm
         attempts += 1
         return next(generated)
 
-    credential_generator._create_credential_file(output, token_factory=token_factory)
+    credential_generator._create_credential_file(token_factory=token_factory)
 
     credentials = parse_dotenv(output)
     assert len(credentials) == 3
@@ -84,13 +102,15 @@ def test_private_generator_regenerates_until_all_three_credentials_are_unique(tm
     assert attempts == 4
 
 
-def test_private_generator_refuses_to_replace_existing_credentials(tmp_path: Path):
-    output = tmp_path / ".env.preview-credentials.local"
+def test_private_generator_refuses_to_replace_existing_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    output = configure_test_output(monkeypatch, tmp_path)
     output.write_text("do-not-overwrite\n", encoding="utf-8")
     output.chmod(0o600)
 
     with pytest.raises(ValueError, match="already exists"):
-        credential_generator._create_credential_file(output)
+        credential_generator._create_credential_file()
 
     assert output.read_text(encoding="utf-8") == "do-not-overwrite\n"
     assert list(tmp_path.iterdir()) == [output]
@@ -99,7 +119,7 @@ def test_private_generator_refuses_to_replace_existing_credentials(tmp_path: Pat
 def test_private_generator_cleans_up_if_fsync_fails_before_publication(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    output = tmp_path / ".env.preview-credentials.local"
+    output = configure_test_output(monkeypatch, tmp_path)
 
     def fail_fsync(_descriptor: int) -> None:
         raise OSError("simulated pre-publication write failure")
@@ -107,7 +127,52 @@ def test_private_generator_cleans_up_if_fsync_fails_before_publication(
     monkeypatch.setattr(credential_generator.os, "fsync", fail_fsync)
 
     with pytest.raises(OSError, match="pre-publication write failure"):
-        credential_generator._create_credential_file(output)
+        credential_generator._create_credential_file()
 
     assert not output.exists()
     assert list(tmp_path.iterdir()) == []
+
+
+def test_failure_cleanup_preserves_preexisting_temp_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    output = configure_test_output(monkeypatch, tmp_path)
+    stale_temporary = tmp_path / ".env.preview-credentials.local.tmp-stale"
+    stale_temporary.write_text("leave-existing-file-alone\n", encoding="utf-8")
+
+    def fail_fsync(_descriptor: int) -> None:
+        raise OSError("simulated pre-publication write failure")
+
+    monkeypatch.setattr(credential_generator.os, "fsync", fail_fsync)
+
+    with pytest.raises(OSError, match="pre-publication write failure"):
+        credential_generator._create_credential_file()
+
+    assert not output.exists()
+    assert stale_temporary.read_text(encoding="utf-8") == "leave-existing-file-alone\n"
+
+
+def test_temp_unlink_failure_does_not_remove_the_published_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    output = configure_test_output(monkeypatch, tmp_path)
+    original_unlink = Path.unlink
+
+    def fail_only_generated_temp(
+        path: Path, *args: object, **kwargs: object
+    ) -> None:
+        if path.name.startswith(".env.preview-credentials.local.tmp-"):
+            raise OSError("simulated temporary cleanup failure")
+        original_unlink(path, *args, **kwargs)
+
+    with monkeypatch.context() as temporary_patch:
+        temporary_patch.setattr(Path, "unlink", fail_only_generated_temp)
+        with pytest.raises(OSError, match="temporary cleanup failure"):
+            credential_generator._create_credential_file()
+
+    assert output.exists()
+    assert tuple(parse_dotenv(output)) == VARIABLES
+    leftovers = [path for path in tmp_path.iterdir() if path != output]
+    assert len(leftovers) == 1
+    assert leftovers[0].name.startswith(".env.preview-credentials.local.tmp-")
+    leftovers[0].unlink()

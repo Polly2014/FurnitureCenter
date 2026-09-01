@@ -1,5 +1,6 @@
 .env
 /.env.preview-credentials.local
+/.env.preview-credentials.local.tmp-*
 .venv/
 *.db
 *.sqlite3
