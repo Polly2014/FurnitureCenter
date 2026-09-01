@@ -6,6 +6,8 @@ import argparse
 import os
 import secrets
 import sys
+import tempfile
+from collections.abc import Callable
 from pathlib import Path
 
 VARIABLES = (
@@ -21,42 +23,50 @@ def generate_token() -> str:
     return f"ms-fc-{secrets.token_urlsafe(32)}"
 
 
-def create_credential_file(output: Path) -> None:
+def _create_credential_file(
+    output: Path, *, token_factory: Callable[[], str] = generate_token
+) -> None:
     if not output.parent.is_dir():
         raise ValueError("credential output parent directory does not exist")
 
-    credentials = {variable: generate_token() for variable in VARIABLES}
+    values: list[str] = []
+    while len(values) < len(VARIABLES):
+        token = token_factory()
+        if token not in values:
+            values.append(token)
+    credentials = dict(zip(VARIABLES, values, strict=True))
     content = "".join(f"{variable}={credentials[variable]}\n" for variable in VARIABLES)
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    try:
-        descriptor = os.open(output, flags, 0o600)
-    except FileExistsError as error:
-        raise ValueError("credential output already exists; refusing to overwrite") from error
+    descriptor, temporary_path = tempfile.mkstemp(
+        prefix=f".{output.name}.", dir=output.parent, text=True
+    )
+    temporary_output = Path(temporary_path)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as credential_file:
             credential_file.write(content)
             credential_file.flush()
             os.fsync(credential_file.fileno())
-        os.chmod(output, 0o600)
+        os.chmod(temporary_output, 0o600)
+        try:
+            os.link(temporary_output, output)
+        except FileExistsError as error:
+            raise ValueError("credential output already exists; refusing to overwrite") from error
     except BaseException:
-        # A partial credential file must not be reused. It contains only this run's
-        # generated tokens and was created exclusively by this process.
-        output.unlink(missing_ok=True)
+        # A partial temporary file contains only this run's generated tokens and
+        # must never become a reusable credential file.
+        temporary_output.unlink(missing_ok=True)
         raise
+    temporary_output.unlink()
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
-    arguments = parser.parse_args()
+    parser.parse_args()
     try:
-        create_credential_file(arguments.output)
+        _create_credential_file(DEFAULT_OUTPUT)
     except (OSError, ValueError) as error:
         print(f"Could not create preview credential file: {error}", file=sys.stderr)
         return 1
-    print(f"Preview credential file written: {arguments.output}")
+    print(f"Preview credential file written: {DEFAULT_OUTPUT}")
     return 0
 
 

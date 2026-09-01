@@ -67,9 +67,12 @@ user-authorized helper below creates three unique `ms-fc-` credentials with at
 least 256 bits of entropy: a browser viewer, a browser admin, and a dedicated
 MCP client. It writes raw values only to the exact repository-root file
 `.env.preview-credentials.local`, refuses to overwrite it, sets mode `0600`,
-and prints only its path. That exact filename is Git-ignored and must remain
-untracked; never copy it into the main `.env`, a shell command, chat, a report,
-or a commit.
+and prints only its path. The CLI deliberately has no output-path override.
+It writes and fsyncs a private same-directory temporary file, then publishes it
+with a no-replacement atomic link; a failure before publication removes the
+temporary artifact and never creates or replaces the final file. That exact
+root-level filename is Git-ignored and must remain untracked; never copy it
+into the main `.env`, a shell command, chat, a report, or a commit.
 
 ```sh
 python scripts/generate_preview_credentials.py
