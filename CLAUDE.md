@@ -18,10 +18,16 @@ production remains untouched until preview passes are in
 `docs/deployment/cloudflare-runbook.md`.  Never expose or commit a viewer,
 admin, MCP, CopilotX, or session-signing credential.
 
+The active V2 product contract is `docs/plans/2026-09-01-furniture-sharing-platform-v2-goal-design.md`.
+It adds site lifecycle administration and immutable allocation history. A transfer closes
+the entire source shared listing, never increments the destination, and records the
+listed, transferred, and unlisted remainder quantities.
+
 ## Product
 
-FurnitureCenter is an internal furniture inventory discovery and management system
-deployed at `fc.polly.wang`. It manages furniture only.
+The user-facing product is “家具共享平台” / `FURNITURE SHARING PLATFORM`, planned for
+`fc.polly.wang`. `FurnitureCenter` remains only the stable repository/package/deployment
+identifier. The product manages furniture only.
 
 The primary experience is a spatial query workspace where users can combine natural
 language questions with structured filters, inspect matching furniture on a map, and
@@ -51,8 +57,9 @@ Chinese workflow is complete.
 
 ### Data administration
 
-- CRUD for furniture, categories, sites, inventory, and images
+- CRUD for furniture, categories, active/inactive sites, inventory, and images
 - Explicit inventory adjustment operations instead of direct quantity overwrites
+- Whole-listing allocation closure with immutable, filterable transfer history
 - Immutable audit history for administrative changes and inventory adjustments
 - Excel used only for the initial migration, not as an ongoing transactional source
 
@@ -66,7 +73,7 @@ Chinese workflow is complete.
 
 ## Explicit Non-Goals For The First Release
 
-- Furniture transfer requests, reservations, approvals, or cancellation workflows
+- Reservation, approval, cancellation, or multi-stage transfer-request workflows
 - 3D command generation or 3D model rendering
 - Generic facilities, room, employee, or space-management features
 - Spreadsheet-based ongoing editing
@@ -156,6 +163,8 @@ Keep new modules within these boundaries unless the design document is updated f
 - The first administration scope includes furniture, categories, sites, inventory,
   images, inventory adjustment history, and an audit trail.
 - MCP is mandatory.
+- MCP remains read-only and exposes only active sites and active positive-availability listings.
+- Allocation means “领取后整批下架”: the destination is not an inventory ledger and is unchanged.
 
 ## Commands
 
@@ -189,7 +198,7 @@ npm run lint
 
 ## Next Implementation Phase
 
-- Category and site administration UI and use cases
+- Category administration UI and use cases
 - Image upload/storage adapter instead of URL-only image administration
 - Durable multi-turn Agent sessions and authenticated user identity
 - Alembic baseline migration and PostgreSQL deployment configuration

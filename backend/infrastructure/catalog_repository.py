@@ -1,4 +1,4 @@
-from sqlalchemy import Select, or_, select
+from sqlalchemy import Select, and_, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from backend.application.catalog import QueryFilters
@@ -9,7 +9,7 @@ from backend.domain.catalog import (
     InventoryPosition,
     Site,
 )
-from backend.infrastructure.models import FurnitureRecord, InventoryRecord
+from backend.infrastructure.models import FurnitureRecord, InventoryRecord, SiteRecord
 
 
 class SqlAlchemyCatalogRepository:
@@ -43,14 +43,14 @@ class SqlAlchemyCatalogRepository:
             )
         if filters.category:
             statement = statement.where(FurnitureRecord.category.has(name=filters.category))
+        public_listing = and_(
+            InventoryRecord.status == "active",
+            InventoryRecord.quantity_available > 0,
+            InventoryRecord.site.has(SiteRecord.is_active.is_(True)),
+        )
         if filters.site_id:
-            statement = statement.where(
-                FurnitureRecord.inventory.any(InventoryRecord.site_id == filters.site_id)
-            )
-        if filters.available_only:
-            statement = statement.where(
-                FurnitureRecord.inventory.any(InventoryRecord.quantity_available > 0)
-            )
+            public_listing = and_(public_listing, InventoryRecord.site_id == filters.site_id)
+        statement = statement.where(FurnitureRecord.inventory.any(public_listing))
 
         records = self._session.scalars(statement.order_by(FurnitureRecord.name).limit(limit))
         return [self._to_domain(record, filters.site_id) for record in records]
@@ -60,7 +60,10 @@ class SqlAlchemyCatalogRepository:
         inventory = (
             position
             for position in record.inventory
-            if site_id is None or position.site_id == site_id
+            if position.status == "active"
+            and position.quantity_available > 0
+            and position.site.is_active
+            and (site_id is None or position.site_id == site_id)
         )
         return Furniture(
             id=record.id,

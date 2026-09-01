@@ -1,13 +1,17 @@
-# FurnitureCenter
+# 家具共享平台
 
-Spatial furniture discovery and management for `fc.polly.wang`.
+跨园区发布闲置家具、查询共享目录并追踪领取调拨记录的平台，计划部署于
+`fc.polly.wang`。仓库和内部包名继续使用 `FurnitureCenter`。
 
 ## Current MVP
 
 - Natural-language and structured furniture queries
 - Synchronized catalog, MapLibre map, and furniture image viewer
 - Furniture create/update/delete operations
+- Site create/update/deactivate operations with map coordinates
 - Transactional inventory adjustments with audit events
+- Whole-listing allocation: the source listing closes, the destination is unchanged,
+  and an immutable transfer record preserves the listed/transferred/unlisted quantities
 - One-time protected Excel migration with complete attributes and recoverable images
 - Official MCP Python SDK 2.x server with typed structured output
 - Deterministic local demo catalog
@@ -76,6 +80,12 @@ are ignored by Git. The current local import contains 18 furniture kinds, 307 av
 items, 15 recovered images, and three registered sites. The current regional worksheets
 contain no furniture rows, so all 307 inventory items truthfully remain assigned to BJW.
 
+For Cloudflare migration, first upgrade the local SQLite schema, then use
+`scripts/export_sqlite_for_d1.py`. The package preserves site lifecycle fields,
+listing status/closure fields, and `transfer_records`, while deliberately excluding
+access-token and session secrets. Any actor token IDs referenced by transfer history
+must already exist in the target D1 as separately issued hash-only records.
+
 ## MCP
 
 ```powershell
@@ -97,11 +107,16 @@ VS Code workspace root.
 Set-Location frontend
 npm run build
 npm run lint
+
+Set-Location ..\worker
+npm test
+npm run typecheck
 ```
 
 See `CLAUDE.md` for product boundaries and
-`docs/plans/2026-08-30-furniture-center-mvp-design.md`
-for the architecture and staged delivery plan.
+`docs/plans/2026-08-30-furniture-center-mvp-design.md` for the original architecture.
+The current site/transfer semantics and Definition of Done are in
+[`docs/plans/2026-09-01-furniture-sharing-platform-v2-goal-design.md`](docs/plans/2026-09-01-furniture-sharing-platform-v2-goal-design.md).
 
 ## Cloudflare deployment
 

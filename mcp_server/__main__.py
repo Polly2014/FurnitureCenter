@@ -5,7 +5,7 @@ from mcp_server.server import mcp
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run the FurnitureCenter MCP server")
+    parser = argparse.ArgumentParser(description="Run the 家具共享平台 MCP server")
     parser.add_argument(
         "--transport",
         choices=("stdio", "streamable-http"),

@@ -8,7 +8,7 @@ from backend.api.schemas import QueryResultDto
 from backend.application.catalog import QueryFilters
 from backend.application.factory import catalog_service
 
-mcp = MCPServer("FurnitureCenter")
+mcp = MCPServer("家具共享平台")
 
 
 @mcp.tool(

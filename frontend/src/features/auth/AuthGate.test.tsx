@@ -28,6 +28,8 @@ describe('AuthGate', () => {
     )
 
     await screen.findByLabelText('访问凭据')
+    expect(screen.getByText('FURNITURE SHARING PLATFORM')).toBeInTheDocument()
+    expect(screen.getByText('家具共享平台')).toBeInTheDocument()
     expect(screen.queryByText('PRIVATE INVENTORY')).not.toBeInTheDocument()
     expect(screen.queryByText('访问家具共享目录')).not.toBeInTheDocument()
     expect(
@@ -62,7 +64,7 @@ describe('AuthGate', () => {
 
     const token = 'ms-fc-admin-browser-test-token'
     await user.type(await screen.findByLabelText('访问凭据'), token)
-    await user.click(screen.getByRole('button', { name: '进入 FurnitureCenter' }))
+    await user.click(screen.getByRole('button', { name: '进入家具共享平台' }))
 
     expect(await screen.findByText('已登录：admin · 家具管理员')).toBeInTheDocument()
     expect(screen.queryByDisplayValue(token)).not.toBeInTheDocument()
@@ -80,7 +82,7 @@ describe('AuthGate', () => {
 
     const input = await screen.findByLabelText('访问凭据')
     await user.type(input, 'ms-fc-invalid-secret-value')
-    await user.click(screen.getByRole('button', { name: '进入 FurnitureCenter' }))
+    await user.click(screen.getByRole('button', { name: '进入家具共享平台' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('凭据无效或已失效')
     expect(input).toHaveValue('')

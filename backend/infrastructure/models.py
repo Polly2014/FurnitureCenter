@@ -35,6 +35,14 @@ class SiteRecord(Base):
     city: Mapped[str] = mapped_column(String(80))
     latitude: Mapped[float]
     longitude: Mapped[float]
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+    __mapper_args__ = {"version_id_col": version}
 
 
 class FurnitureRecord(Base):
@@ -100,6 +108,9 @@ class InventoryRecord(Base):
     quantity_total: Mapped[int] = mapped_column(Integer)
     quantity_available: Mapped[int] = mapped_column(Integer)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    closed_reason: Mapped[str | None] = mapped_column(String(80), nullable=True)
 
     __mapper_args__ = {"version_id_col": version}
 
@@ -123,6 +134,39 @@ class InventoryAdjustmentRecord(Base):
     transfer_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     reason: Mapped[str] = mapped_column(String(240))
     actor: Mapped[str] = mapped_column(String(120))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class TransferRecord(Base):
+    __tablename__ = "transfer_records"
+    __table_args__ = (
+        CheckConstraint("listed_quantity_before > 0", name="ck_transfer_listed_positive"),
+        CheckConstraint("transferred_quantity > 0", name="ck_transfer_quantity_positive"),
+        CheckConstraint(
+            "transferred_quantity <= listed_quantity_before",
+            name="ck_transfer_quantity_within_listing",
+        ),
+        CheckConstraint(
+            "unlisted_remainder = listed_quantity_before - transferred_quantity",
+            name="ck_transfer_remainder",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    furniture_id: Mapped[str] = mapped_column(ForeignKey("furniture.id"), index=True)
+    source_inventory_id: Mapped[str] = mapped_column(ForeignKey("inventory.id"), index=True)
+    source_site_id: Mapped[str] = mapped_column(ForeignKey("sites.id"), index=True)
+    source_site_code_snapshot: Mapped[str] = mapped_column(String(50))
+    source_site_name_snapshot: Mapped[str] = mapped_column(String(200))
+    destination_site_id: Mapped[str] = mapped_column(ForeignKey("sites.id"), index=True)
+    destination_site_code_snapshot: Mapped[str] = mapped_column(String(50))
+    destination_site_name_snapshot: Mapped[str] = mapped_column(String(200))
+    listed_quantity_before: Mapped[int] = mapped_column(Integer)
+    transferred_quantity: Mapped[int] = mapped_column(Integer)
+    unlisted_remainder: Mapped[int] = mapped_column(Integer)
+    reason: Mapped[str] = mapped_column(String(240))
+    actor_token_id: Mapped[str] = mapped_column(String(120))
+    actor_label_snapshot: Mapped[str] = mapped_column(String(200))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 

@@ -45,7 +45,8 @@ def create_source_db(path: Path, image_url: str = "/media/chair.png") -> None:
         CREATE TABLE categories (id TEXT PRIMARY KEY, name TEXT NOT NULL);
         CREATE TABLE sites (
           id TEXT PRIMARY KEY, code TEXT NOT NULL, name TEXT NOT NULL, city TEXT NOT NULL,
-          latitude REAL NOT NULL, longitude REAL NOT NULL
+          latitude REAL NOT NULL, longitude REAL NOT NULL, is_active INTEGER NOT NULL,
+          version INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
         );
         CREATE TABLE furniture (
           id TEXT PRIMARY KEY, sku TEXT NOT NULL, name TEXT NOT NULL, name_en TEXT NOT NULL,
@@ -62,7 +63,18 @@ def create_source_db(path: Path, image_url: str = "/media/chair.png") -> None:
         CREATE TABLE inventory (
           id TEXT PRIMARY KEY, furniture_id TEXT NOT NULL, site_id TEXT NOT NULL,
           quantity_total INTEGER NOT NULL, quantity_available INTEGER NOT NULL,
-          version INTEGER NOT NULL
+          version INTEGER NOT NULL, status TEXT NOT NULL, closed_at TEXT, closed_reason TEXT
+        );
+        CREATE TABLE transfer_records (
+          id TEXT PRIMARY KEY, furniture_id TEXT NOT NULL, source_inventory_id TEXT NOT NULL,
+          source_site_id TEXT NOT NULL, source_site_code_snapshot TEXT NOT NULL,
+          source_site_name_snapshot TEXT NOT NULL, destination_site_id TEXT NOT NULL,
+          destination_site_code_snapshot TEXT NOT NULL,
+          destination_site_name_snapshot TEXT NOT NULL,
+          listed_quantity_before INTEGER NOT NULL, transferred_quantity INTEGER NOT NULL,
+          unlisted_remainder INTEGER NOT NULL, reason TEXT NOT NULL,
+          actor_token_id TEXT NOT NULL, actor_label_snapshot TEXT NOT NULL,
+          created_at TEXT NOT NULL
         );
         CREATE TABLE inventory_adjustments (
           id TEXT PRIMARY KEY, inventory_id TEXT NOT NULL, delta INTEGER NOT NULL,
@@ -83,16 +95,32 @@ def create_source_db(path: Path, image_url: str = "/media/chair.png") -> None:
     connection.executescript(
         """
         INSERT INTO categories VALUES ('cat-1', 'Seating');
-        INSERT INTO sites VALUES ('site-bj', 'BJ', 'Beijing', 'Beijing', 39.9, 116.4);
-        INSERT INTO sites VALUES ('site-sh', 'SH', 'Shanghai', 'Shanghai', 31.2, 121.5);
+        INSERT INTO sites VALUES (
+          'site-bj', 'BJ', 'Beijing', 'Beijing', 39.9, 116.4, 1, 2,
+          '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z'
+        );
+        INSERT INTO sites VALUES (
+          'site-sh', 'SH', 'Shanghai', 'Shanghai', 31.2, 121.5, 0, 3,
+          '2026-01-01T00:00:00Z', '2026-01-03T00:00:00Z'
+        );
         INSERT INTO furniture VALUES (
           'fur-1', 'SKU-1', 'O''Brien Chair', '', 'Seating', 'A ''quoted'' chair', 'good',
           '', '', '', '', '', 'workbook.xlsx', 'Sheet1', 7, '{}', 'cat-1',
           '2026-01-02T03:04:05Z', '2026-01-02T03:04:05Z'
         );
         INSERT INTO furniture_images VALUES ('img-1', 'fur-1', '/placeholder', 'Primary chair', 1);
-        INSERT INTO inventory VALUES ('inv-bj', 'fur-1', 'site-bj', 18, 12, 3);
-        INSERT INTO inventory VALUES ('inv-sh', 'fur-1', 'site-sh', 8, 4, 2);
+        INSERT INTO inventory VALUES (
+          'inv-bj', 'fur-1', 'site-bj', 18, 12, 3, 'active', NULL, NULL
+        );
+        INSERT INTO inventory VALUES (
+          'inv-sh', 'fur-1', 'site-sh', 8, 0, 2, 'allocated',
+          '2026-01-04T00:00:00Z', 'transferred'
+        );
+        INSERT INTO transfer_records VALUES (
+          'transfer-1', 'fur-1', 'inv-sh', 'site-sh', 'SH', 'Shanghai',
+          'site-bj', 'BJ', 'Beijing', 10, 3, 7, 'Meeting room pickup',
+          'token-1', 'Migration admin', '2026-01-04T00:00:00Z'
+        );
         INSERT INTO inventory_adjustments VALUES (
           'adj-1', 'inv-bj', 0, 'correction', 2, 1, 16, 18, 11, 12, NULL,
           'initial import', 'migration', '2026-01-02T03:04:05Z'
@@ -114,6 +142,14 @@ def apply_target_schema(path: Path) -> None:
     connection = sqlite3.connect(path)
     for migration in sorted((PROJECT_ROOT / "worker" / "migrations").glob("*.sql")):
         connection.executescript(migration.read_text())
+    connection.execute(
+        """
+        INSERT INTO access_tokens
+          (id, token_hash, role, scopes_json, label, daily_quota)
+        VALUES ('token-1', 'fixture-token-hash', 'admin', '[]', 'Migration admin', 100)
+        """
+    )
+    connection.commit()
     connection.close()
 
 
@@ -156,10 +192,14 @@ def test_export_is_deterministic_escaped_and_excludes_credentials(tmp_path: Path
     assert (second_output / "d1-import.sql").read_bytes() == (output / "d1-import.sql").read_bytes()
     assert sql.index('INSERT INTO "categories"') < sql.index('INSERT INTO "furniture"')
     assert sql.index('INSERT INTO "furniture"') < sql.index('INSERT INTO "furniture_images"')
+    assert sql.index('INSERT INTO "inventory"') < sql.index('INSERT INTO "transfer_records"')
     assert sql.index('INSERT INTO "inventory"') < sql.index('INSERT INTO "inventory_adjustments"')
     assert "O''Brien Chair" in sql
     assert "must-not-export" not in sql
     assert "access_tokens" not in sql
+    assert "'site-sh', 'SH', 'Shanghai', 'Shanghai', 31.199999999999999, 121.5, 0, 3" in sql
+    assert "'inv-sh', 'fur-1', 'site-sh', 8, 0, 2, 'allocated'" in sql
+    assert "'transfer-1', 'fur-1', 'inv-sh'" in sql
     assert manifest["row_counts"] == {
         "audit_events": 1,
         "categories": 1,
@@ -168,6 +208,7 @@ def test_export_is_deterministic_escaped_and_excludes_credentials(tmp_path: Path
         "inventory": 2,
         "inventory_adjustments": 1,
         "sites": 2,
+        "transfer_records": 1,
     }
     image = manifest["images"][0]
     assert image["object_key"] == "furniture/fur-1/images/img-1.png"

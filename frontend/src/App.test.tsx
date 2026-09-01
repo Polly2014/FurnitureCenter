@@ -116,6 +116,8 @@ describe('role-aware application navigation', () => {
     render(<App />)
 
     expect(await screen.findByRole('button', { name: '查询工作台' })).toBeInTheDocument()
+    expect(screen.getAllByText('FURNITURE SHARING PLATFORM')).not.toHaveLength(0)
+    expect(screen.getAllByText('家具共享平台')).not.toHaveLength(0)
     expect(screen.queryByRole('button', { name: '数据管理' })).not.toBeInTheDocument()
     expect(screen.getByText('viewer account')).toBeInTheDocument()
   })

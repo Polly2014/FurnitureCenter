@@ -13,7 +13,7 @@
 .auth-brand { display: flex; align-items: center; gap: 10px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
 .auth-brand > span { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 8px; background: var(--ink); color: white; }
 .auth-brand strong, .auth-brand small { display: block; }
-.auth-brand strong { font-size: 13px; letter-spacing: 1.8px; }
+.auth-brand strong { font-size: 11px; letter-spacing: 1.3px; white-space: nowrap; }
 .auth-brand small { margin-top: 2px; color: var(--muted); font-size: 10px; }
 .auth-form { display: grid; gap: 12px; padding-top: 18px; }
 .auth-form label > span { display: block; margin-bottom: 6px; color: var(--muted); font-size: 10px; }
@@ -37,7 +37,7 @@
 .topbar { height: 66px; display: grid; grid-template-columns: 260px 1fr 260px; align-items: center; padding: 0 22px; border-bottom: 1px solid var(--line); background: rgba(251, 252, 249, .94); backdrop-filter: blur(14px); position: relative; z-index: 20; }
 .brand { border: 0; background: none; display: flex; align-items: center; gap: 10px; color: var(--ink); padding: 0; text-align: left; }
 .brand-mark { width: 34px; height: 34px; display: grid; place-items: center; background: var(--ink); color: white; border-radius: 8px; }
-.brand strong { display: block; font-size: 14px; letter-spacing: 2px; }
+.brand strong { display: block; font-size: 10px; letter-spacing: 1.2px; white-space: nowrap; }
 .brand small { display: block; color: var(--muted); font-size: 11px; margin-top: 1px; }
 .view-switcher { justify-self: center; display: flex; align-items: center; gap: 3px; padding: 3px; background: #e9ece7; border-radius: 8px; }
 .view-switcher button { border: 0; background: transparent; color: #68716f; padding: 8px 14px; display: flex; align-items: center; gap: 7px; font-size: 13px; }

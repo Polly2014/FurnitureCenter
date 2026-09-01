@@ -74,7 +74,7 @@ export function AuthGate({ children }: AuthGateProps) {
       <section className="auth-card">
         <div className="auth-brand">
           <span><Armchair size={23} /></span>
-          <div><strong>FURNITURE CENTER</strong><small>家具中心</small></div>
+          <div><strong>FURNITURE SHARING PLATFORM</strong><small>家具共享平台</small></div>
         </div>
         <form className="auth-form" onSubmit={(event) => void submit(event)}>
           <label>
@@ -93,11 +93,11 @@ export function AuthGate({ children }: AuthGateProps) {
           </label>
           {error && <p className="auth-error" role="alert">{error}</p>}
           <button type="submit" disabled={submitting}>
-            {submitting ? '正在验证…' : '进入 FurnitureCenter'}
+            {submitting ? '正在验证…' : '进入家具共享平台'}
             {!submitting && <ArrowRight size={17} />}
           </button>
         </form>
-        <footer><ShieldCheck size={15} />受保护的内部家具目录</footer>
+        <footer><ShieldCheck size={15} />受保护的家具共享平台</footer>
       </section>
     </main>
   )

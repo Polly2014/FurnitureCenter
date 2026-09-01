@@ -30,12 +30,24 @@ TABLES = (
     "furniture",
     "furniture_images",
     "inventory",
+    "transfer_records",
     "inventory_adjustments",
     "audit_events",
 )
 SOURCE_COLUMNS = {
     "categories": ("id", "name"),
-    "sites": ("id", "code", "name", "city", "latitude", "longitude"),
+    "sites": (
+        "id",
+        "code",
+        "name",
+        "city",
+        "latitude",
+        "longitude",
+        "is_active",
+        "version",
+        "created_at",
+        "updated_at",
+    ),
     "furniture": (
         "id",
         "sku",
@@ -65,6 +77,27 @@ SOURCE_COLUMNS = {
         "quantity_total",
         "quantity_available",
         "version",
+        "status",
+        "closed_at",
+        "closed_reason",
+    ),
+    "transfer_records": (
+        "id",
+        "furniture_id",
+        "source_inventory_id",
+        "source_site_id",
+        "source_site_code_snapshot",
+        "source_site_name_snapshot",
+        "destination_site_id",
+        "destination_site_code_snapshot",
+        "destination_site_name_snapshot",
+        "listed_quantity_before",
+        "transferred_quantity",
+        "unlisted_remainder",
+        "reason",
+        "actor_token_id",
+        "actor_label_snapshot",
+        "created_at",
     ),
     "inventory_adjustments": (
         "id",
@@ -114,6 +147,14 @@ ID_COLUMNS = {
     "furniture": ("id", "category_id"),
     "furniture_images": ("id", "furniture_id"),
     "inventory": ("id", "furniture_id", "site_id"),
+    "transfer_records": (
+        "id",
+        "furniture_id",
+        "source_inventory_id",
+        "source_site_id",
+        "destination_site_id",
+        "actor_token_id",
+    ),
     "inventory_adjustments": ("id", "inventory_id", "transfer_id"),
     "audit_events": ("id", "entity_id"),
 }
@@ -271,6 +312,27 @@ def validate_records(records: dict[str, list[dict[str, object]]]) -> None:
                     f"malformed JSON in {table}.{column} for {row['id']}"
                 ) from error
     inventory_by_id = {row["id"] for row in records["inventory"]}
+    furniture_by_id = {row["id"] for row in records["furniture"]}
+    site_by_id = {row["id"] for row in records["sites"]}
+    for row in records["transfer_records"]:
+        if row["furniture_id"] not in furniture_by_id:
+            raise MigrationError(f"invalid transfer furniture FK: {row['id']}")
+        if row["source_inventory_id"] not in inventory_by_id:
+            raise MigrationError(f"invalid transfer inventory FK: {row['id']}")
+        if row["source_site_id"] not in site_by_id or row["destination_site_id"] not in site_by_id:
+            raise MigrationError(f"invalid transfer site FK: {row['id']}")
+        listed = row["listed_quantity_before"]
+        transferred = row["transferred_quantity"]
+        remainder = row["unlisted_remainder"]
+        if not all(isinstance(value, int) for value in (listed, transferred, remainder)):
+            raise MigrationError(f"invalid transfer quantities: {row['id']}")
+        if (
+            listed <= 0
+            or transferred <= 0
+            or transferred > listed
+            or remainder != listed - transferred
+        ):
+            raise MigrationError(f"inconsistent transfer quantities: {row['id']}")
     for row in records["inventory_adjustments"]:
         if row["inventory_id"] not in inventory_by_id:
             raise MigrationError(f"invalid inventory adjustment FK: {row['id']}")

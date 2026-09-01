@@ -195,7 +195,7 @@ describe('authenticated stateless MCP transport', () => {
       expect(initialized.response.status).toBe(200)
       expect(initialized.body.result).toMatchObject({
         protocolVersion,
-        serverInfo: { name: 'FurnitureCenter', version: '1.0.0' },
+        serverInfo: { name: '家具共享平台', version: '1.0.0' },
         capabilities: { tools: {} },
       })
 
@@ -754,7 +754,7 @@ describe('read-only furniture tools', () => {
     expect(result.isError).toBe(true)
     expect(result.structuredContent).toEqual({
       ok: false,
-      error: { code: 'internal_error', message: 'FurnitureCenter could not complete the request.' },
+      error: { code: 'internal_error', message: '家具共享平台无法完成请求。' },
     })
   })
 
@@ -776,7 +776,7 @@ describe('read-only furniture tools', () => {
     expect(result.isError).toBe(true)
     expect(result.structuredContent).toEqual({
       ok: false,
-      error: { code: 'internal_error', message: 'FurnitureCenter could not complete the request.' },
+      error: { code: 'internal_error', message: '家具共享平台无法完成请求。' },
     })
   })
 
@@ -798,7 +798,7 @@ describe('read-only furniture tools', () => {
     expect(failed.isError).toBe(true)
     expect(failed.structuredContent).toEqual({
       ok: false,
-      error: { code: 'internal_error', message: 'FurnitureCenter could not complete the request.' },
+      error: { code: 'internal_error', message: '家具共享平台无法完成请求。' },
     })
     expect(JSON.stringify(failed)).not.toMatch(/SQL|categories|D1_ERROR|no such table/iu)
   })

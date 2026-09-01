@@ -115,7 +115,7 @@ export class CopilotXClient {
         body: JSON.stringify({
           model: this.model,
           stream: true,
-          instructions: '你是 FurnitureCenter 家具查询助手。仅根据提供的真实查询结果，用简洁自然的中文回答。不得编造家具、地点、库存或属性。不要描述内部查询过程，不要使用 Markdown 表格。',
+          instructions: '你是家具共享平台的查询助手。仅根据提供的真实查询结果，用简洁自然的中文回答。不得编造家具、地点、库存或属性。不要描述内部查询过程，不要使用 Markdown 表格。',
           input: JSON.stringify({ question: message, total_kinds: result.total, items }),
         }),
         signal,

@@ -1,4 +1,4 @@
-# FurnitureCenter Cloudflare deployment runbook
+# 家具共享平台 Cloudflare deployment runbook
 
 This runbook keeps preview and production physically separate.  Never bind an
 environment to the other's D1 database, R2 bucket, token records, or secrets.
@@ -19,13 +19,14 @@ exception is the local, ignored preview credential file described below.
 | MCP host allow-list | `furniture-center-preview.26716201.workers.dev` |
 | Worker Secrets (names only) | `COPILOTX_API_KEY`, `SESSION_SIGNING_KEY` |
 
-The preview D1 database has all six migrations and the reconciled real catalog:
+The recorded preview checkpoint predates V2 and has migrations 0001-0006 plus the reconciled real catalog:
 3 categories, 3 sites, 4 furniture records, 5 inventory positions, 4 image
 metadata records, and zero audit/adjustment records.  Four JPEG objects were
 uploaded to its private R2 bucket and SHA-256 reconciled.
 
-Preview is not production-ready until a human securely issues separate viewer,
-admin, and MCP credentials and completes the authenticated smoke tests.
+V2 requires applying `0007_sharing_platform_v2.sql` to preview before deployment.
+Preview is not production-ready until separate viewer, admin, and MCP credentials
+complete the authenticated V2 smoke tests below.
 
 ## Preview provisioning and deployment
 
@@ -43,6 +44,13 @@ npx wrangler r2 object put furniture-center-images-preview/furniture/<id>/images
 npm --prefix ../frontend run build
 npx wrangler deploy --env preview
 ```
+
+Apply migrations in filename order and confirm 0007 is listed before importing any
+V2 SQLite export. The exporter includes `sites.is_active/version/timestamps`,
+`inventory.status/closed_at/closed_reason`, and immutable `transfer_records`; it never
+exports access-token rows. If imported transfer records reference actor token IDs,
+create the matching target D1 token records from separately issued hashes before the
+import. Never weaken the foreign key or copy plaintext credentials to satisfy an import.
 
 After the first deploy, copy the printed `workers.dev` host exactly into
 `env.preview.vars.MCP_ALLOWED_HOSTS` in `worker/wrangler.jsonc`, then deploy
@@ -110,9 +118,12 @@ unset FC_TOKEN_HASH FC_TOKEN_ID
 Enter the browser credentials directly into the deployed login page and the
 MCP credential into a trusted Streamable HTTP client. Do not send any plaintext
 value through chat. Test invalid/revoked credentials separately, CSRF logout,
-viewer/admin route boundaries, Chat streaming, four image reads, an inventory
-adjustment and transfer (with audit rows), MCP discovery/tools, and sanitized
-logs. Record only IDs, role/labels, outcomes, and version IDs.
+viewer/admin route boundaries, Chat streaming, image reads, MCP discovery/tools,
+and sanitized logs. For V2, create and edit one preview-only site, create an A=10
+shared listing, allocate 3 to B, and prove A becomes unavailable, B is unchanged,
+and the immutable history shows 10/3/7 plus reason, actor, and timestamp. Confirm
+catalog, detail, map, Chat, and MCP all hide the closed source listing. Record only
+IDs, role/labels, outcomes, row counts, and version IDs.
 
 To rotate a preview credential, first revoke its D1 record, then remove the
 local credential file on the trusted machine, regenerate a new file, and insert
@@ -143,9 +154,10 @@ Reconcile D1 row counts and every R2 object SHA-256 against the ignored
 `real-export-20260901-controller/manifest.json`.  Use `--remote` for every R2
 operation; without it Wrangler targets local emulator storage.
 
-List a known-good preview version before any new deployment.  If a smoke test
-fails after deployment, roll back only the preview Worker, retain its D1/R2
-evidence, and investigate before retrying:
+List a known-good preview version and preserve a redacted pre-migration D1 export before
+any V2 migration or deployment. Worker rollback does not reverse additive D1 migration
+0007 or restore changed test rows. If a smoke test fails, roll back only the preview
+Worker, retain the pre-migration export plus D1/R2 evidence, and investigate before retrying:
 
 ```sh
 npx wrangler deployments list --env preview

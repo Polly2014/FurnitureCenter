@@ -519,7 +519,7 @@ function FurnitureApp({ session, onLogout }: FurnitureAppProps) {
       <header className="topbar">
         <button className="brand" type="button" onClick={() => setView('query')}>
           <span className="brand-mark"><Armchair size={18} /></span>
-          <span><strong>FURNITURE CENTER</strong><small>家具中心</small></span>
+          <span><strong>FURNITURE SHARING PLATFORM</strong><small>家具共享平台</small></span>
         </button>
         <nav className="view-switcher" aria-label="主导航">
           <button className={view === 'query' ? 'is-active' : ''} onClick={() => setView('query')}><Search size={16} />查询工作台</button>

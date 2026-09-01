@@ -252,7 +252,7 @@ async function mcpFurniture(
 }
 
 export function createFurnitureMcpServer(env: Env, publicOrigin: string) {
-  const server = new McpServer({ name: 'FurnitureCenter', version: '1.0.0' })
+  const server = new McpServer({ name: '家具共享平台', version: '1.0.0' })
   const catalog = new CatalogService(new D1CatalogRepository(env.DB))
 
   server.registerTool(
@@ -309,7 +309,7 @@ export function createFurnitureMcpServer(env: Env, publicOrigin: string) {
           structuredContent,
         }
       } catch {
-        return errorResult('internal_error', 'FurnitureCenter could not complete the request.')
+        return errorResult('internal_error', '家具共享平台无法完成请求。')
       }
     },
   )
@@ -337,7 +337,7 @@ export function createFurnitureMcpServer(env: Env, publicOrigin: string) {
           structuredContent,
         }
       } catch {
-        return errorResult('internal_error', 'FurnitureCenter could not complete the request.')
+        return errorResult('internal_error', '家具共享平台无法完成请求。')
       }
     },
   )
@@ -362,7 +362,7 @@ export function createFurnitureMcpServer(env: Env, publicOrigin: string) {
           structuredContent,
         }
       } catch {
-        return errorResult('internal_error', 'FurnitureCenter could not complete the request.')
+        return errorResult('internal_error', '家具共享平台无法完成请求。')
       }
     },
   )
@@ -387,7 +387,7 @@ export function createFurnitureMcpServer(env: Env, publicOrigin: string) {
           structuredContent,
         }
       } catch {
-        return errorResult('internal_error', 'FurnitureCenter could not complete the request.')
+        return errorResult('internal_error', '家具共享平台无法完成请求。')
       }
     },
   )

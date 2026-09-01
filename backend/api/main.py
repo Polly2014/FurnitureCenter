@@ -69,7 +69,7 @@ async def lifespan(_: FastAPI):
 
 
 settings = get_settings()
-app = FastAPI(title="FurnitureCenter API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="家具共享平台 API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[origin.strip() for origin in settings.cors_origins.split(",")],
@@ -105,7 +105,11 @@ def search_furniture(
 @app.get("/api/catalog/metadata", response_model=CatalogMetadataDto)
 def get_catalog_metadata(session: Session = Depends(get_session)) -> CatalogMetadataDto:
     categories = list(session.scalars(select(CategoryRecord).order_by(CategoryRecord.name)))
-    sites = list(session.scalars(select(SiteRecord).order_by(SiteRecord.name)))
+    sites = list(
+        session.scalars(
+            select(SiteRecord).where(SiteRecord.is_active.is_(True)).order_by(SiteRecord.name)
+        )
+    )
     return CatalogMetadataDto(
         categories=[CategoryDto(id=category.id, name=category.name) for category in categories],
         sites=[SiteDto.model_validate(site, from_attributes=True) for site in sites],
@@ -129,7 +133,11 @@ def agent_query(
     session: Session = Depends(get_session),
 ) -> QueryResultDto:
     categories = list(session.scalars(select(CategoryRecord.name).order_by(CategoryRecord.name)))
-    site_records = list(session.scalars(select(SiteRecord).order_by(SiteRecord.name)))
+    site_records = list(
+        session.scalars(
+            select(SiteRecord).where(SiteRecord.is_active.is_(True)).order_by(SiteRecord.name)
+        )
+    )
     try:
         planner = build_query_planner(settings)
     except AgentConfigurationError as error:
@@ -157,7 +165,11 @@ def agent_query_stream(
 ) -> Iterator[ServerSentEvent]:
     yield ServerSentEvent(event="status", data={"phase": "planning"})
     categories = list(session.scalars(select(CategoryRecord.name).order_by(CategoryRecord.name)))
-    site_records = list(session.scalars(select(SiteRecord).order_by(SiteRecord.name)))
+    site_records = list(
+        session.scalars(
+            select(SiteRecord).where(SiteRecord.is_active.is_(True)).order_by(SiteRecord.name)
+        )
+    )
     try:
         planner = build_query_planner(settings)
         answer_streamer = build_answer_streamer(settings)

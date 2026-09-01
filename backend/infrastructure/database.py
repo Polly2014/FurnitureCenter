@@ -30,6 +30,12 @@ def upgrade_local_sqlite_schema(database_engine: Engine) -> None:
         return
 
     inventory_columns = {column["name"] for column in inspector.get_columns("inventory")}
+    site_table_exists = inspector.has_table("sites")
+    site_columns = (
+        {column["name"] for column in inspector.get_columns("sites")}
+        if site_table_exists
+        else set()
+    )
     adjustment_table_exists = inspector.has_table("inventory_adjustments")
     adjustment_columns = (
         {
@@ -48,10 +54,103 @@ def upgrade_local_sqlite_schema(database_engine: Engine) -> None:
             connection.execute(
                 text("ALTER TABLE inventory ADD COLUMN version INTEGER NOT NULL DEFAULT 1")
             )
+        inventory_additions = {
+            "status": "VARCHAR(20) NOT NULL DEFAULT 'active'",
+            "closed_at": "DATETIME",
+            "closed_reason": "VARCHAR(80)",
+        }
+        added_status = "status" not in inventory_columns
+        for column_name, definition in inventory_additions.items():
+            if column_name not in inventory_columns:
+                connection.execute(
+                    text(f"ALTER TABLE inventory ADD COLUMN {column_name} {definition}")
+                )
+        if added_status:
+            connection.execute(
+                text(
+                    "UPDATE inventory SET status = 'withdrawn', "
+                    "closed_at = CURRENT_TIMESTAMP, closed_reason = 'migration' "
+                    "WHERE quantity_available <= 0"
+                )
+            )
         connection.execute(
             text(
                 "CREATE UNIQUE INDEX IF NOT EXISTS uq_inventory_furniture_site "
                 "ON inventory (furniture_id, site_id)"
+            )
+        )
+
+        if site_table_exists:
+            site_additions = {
+                "is_active": "BOOLEAN NOT NULL DEFAULT 1",
+                "version": "INTEGER NOT NULL DEFAULT 1",
+                "created_at": "DATETIME NOT NULL DEFAULT '1970-01-01T00:00:00Z'",
+                "updated_at": "DATETIME NOT NULL DEFAULT '1970-01-01T00:00:00Z'",
+            }
+            for column_name, definition in site_additions.items():
+                if column_name not in site_columns:
+                    connection.execute(
+                        text(f"ALTER TABLE sites ADD COLUMN {column_name} {definition}")
+                    )
+
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS transfer_records (
+                    id VARCHAR(36) PRIMARY KEY,
+                    furniture_id VARCHAR(36) NOT NULL,
+                    source_inventory_id VARCHAR(36) NOT NULL,
+                    source_site_id VARCHAR(36) NOT NULL,
+                    source_site_code_snapshot VARCHAR(50) NOT NULL,
+                    source_site_name_snapshot VARCHAR(200) NOT NULL,
+                    destination_site_id VARCHAR(36) NOT NULL,
+                    destination_site_code_snapshot VARCHAR(50) NOT NULL,
+                    destination_site_name_snapshot VARCHAR(200) NOT NULL,
+                    listed_quantity_before INTEGER NOT NULL,
+                    transferred_quantity INTEGER NOT NULL,
+                    unlisted_remainder INTEGER NOT NULL,
+                    reason VARCHAR(240) NOT NULL,
+                    actor_token_id VARCHAR(120) NOT NULL,
+                    actor_label_snapshot VARCHAR(200) NOT NULL,
+                    created_at DATETIME NOT NULL,
+                    FOREIGN KEY(furniture_id) REFERENCES furniture (id),
+                    FOREIGN KEY(source_inventory_id) REFERENCES inventory (id),
+                    FOREIGN KEY(source_site_id) REFERENCES sites (id),
+                    FOREIGN KEY(destination_site_id) REFERENCES sites (id),
+                    CHECK(listed_quantity_before > 0),
+                    CHECK(transferred_quantity > 0),
+                    CHECK(transferred_quantity <= listed_quantity_before),
+                    CHECK(unlisted_remainder = listed_quantity_before - transferred_quantity)
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_transfer_records_created "
+                "ON transfer_records (created_at DESC, id DESC)"
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE TRIGGER IF NOT EXISTS transfer_records_immutable_update
+                BEFORE UPDATE ON transfer_records
+                BEGIN
+                    SELECT RAISE(ABORT, 'transfer records are immutable');
+                END
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE TRIGGER IF NOT EXISTS transfer_records_immutable_delete
+                BEFORE DELETE ON transfer_records
+                BEGIN
+                    SELECT RAISE(ABORT, 'transfer records are immutable');
+                END
+                """
             )
         )
 

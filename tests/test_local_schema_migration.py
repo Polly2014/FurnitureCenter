@@ -15,6 +15,20 @@ def test_legacy_sqlite_inventory_schema_is_upgraded_without_losing_history(
         connection.execute(
             text(
                 """
+                CREATE TABLE sites (
+                    id VARCHAR(36) PRIMARY KEY,
+                    code VARCHAR(24) NOT NULL,
+                    name VARCHAR(120) NOT NULL,
+                    city VARCHAR(80) NOT NULL,
+                    latitude FLOAT NOT NULL,
+                    longitude FLOAT NOT NULL
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
                 CREATE TABLE inventory (
                     id VARCHAR(36) PRIMARY KEY,
                     furniture_id VARCHAR(36) NOT NULL,
@@ -65,10 +79,14 @@ def test_legacy_sqlite_inventory_schema_is_upgraded_without_losing_history(
     migrate(engine)
 
     inventory_columns = {column["name"] for column in inspect(engine).get_columns("inventory")}
+    site_columns = {column["name"] for column in inspect(engine).get_columns("sites")}
     adjustment_columns = {
         column["name"] for column in inspect(engine).get_columns("inventory_adjustments")
     }
     assert "version" in inventory_columns
+    assert {"status", "closed_at", "closed_reason"} <= inventory_columns
+    assert {"is_active", "version", "created_at", "updated_at"} <= site_columns
+    assert inspect(engine).has_table("transfer_records")
     assert {
         "kind",
         "delta_total",

@@ -46,7 +46,11 @@ class RuleBasedQueryPlanner:
             for keywords, preferred_categories in category_hints:
                 if any(keyword in message for keyword in keywords):
                     category = next(
-                        (candidate for candidate in preferred_categories if candidate in categories),
+                        (
+                            candidate
+                            for candidate in preferred_categories
+                            if candidate in categories
+                        ),
                         None,
                     )
                     break
@@ -183,7 +187,7 @@ class OpenAIAnswerStreamer:
             with self._client.responses.stream(
                 model=self._model,
                 instructions=(
-                    "你是 FurnitureCenter 家具查询助手。根据提供的真实查询结果，用简洁自然的中文"
+                    "你是家具共享平台的查询助手。根据提供的真实查询结果，用简洁自然的中文"
                     "直接回答用户。不得编造结果中不存在的家具、地点、库存或属性。优先概括命中"
                     "数量，再指出最相关的家具和位置；若没有结果，说明未找到并建议放宽条件。"
                     "不要描述内部查询过程，不要使用 Markdown 表格。"
@@ -229,7 +233,10 @@ class FurnitureQueryAgent:
             answer = "没有找到符合条件的家具，可以尝试放宽地点、分类或库存条件。"
         else:
             quantity = sum(item.quantity_available for item in result.items)
-            answer = f"找到 {result.total} 类家具，共有 {quantity} 件可用。已在地图和图片列表中标出。"
+            answer = (
+                f"找到 {result.total} 类家具，共有 {quantity} 件可用。"
+                "已在地图和图片列表中标出。"
+            )
         return QueryResult(
             items=result.items,
             map_features=result.map_features,
