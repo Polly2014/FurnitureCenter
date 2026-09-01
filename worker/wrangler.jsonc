@@ -37,8 +37,25 @@
   "env": {
     "preview": {
       "name": "furniture-center-preview",
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "furniture-center-preview",
+          "database_id": "12e00396-5823-4167-ad07-575b6ae977ce",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "IMAGES",
+          "bucket_name": "furniture-center-images-preview"
+        }
+      ],
       "images": { "binding": "IMAGES_TRANSFORM" },
-      "vars": { "ENVIRONMENT": "preview" }
+      "vars": {
+        "ENVIRONMENT": "preview",
+        "MCP_ALLOWED_HOSTS": "furniture-center-preview.26716201.workers.dev"
+      }
     },
     "production": {
       "name": "furniture-center",

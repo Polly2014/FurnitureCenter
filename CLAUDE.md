@@ -12,6 +12,12 @@ Do not copy the FurnitureHub
 implementation wholesale. Reuse only validated domain rules, import knowledge,
 deterministic fixtures, and tests that still match this product.
 
+An isolated Cloudflare preview Worker is deployed.  The active resource IDs,
+authenticated-test gate, rollback instructions, and the explicit rule that
+production remains untouched until preview passes are in
+`docs/deployment/cloudflare-runbook.md`.  Never expose or commit a viewer,
+admin, MCP, CopilotX, or session-signing credential.
+
 ## Product
 
 FurnitureCenter is an internal furniture inventory discovery and management system

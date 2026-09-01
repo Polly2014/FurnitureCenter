@@ -102,3 +102,12 @@ npm run lint
 See `CLAUDE.md` for product boundaries and
 `docs/plans/2026-08-30-furniture-center-mvp-design.md`
 for the architecture and staged delivery plan.
+
+## Cloudflare deployment
+
+The Worker has a separately bound preview environment.  Its active, non-secret
+resource names and the credential, verification, rollback, and production
+cutover gates are documented in
+[`docs/deployment/cloudflare-runbook.md`](docs/deployment/cloudflare-runbook.md).
+Do not reuse preview data, R2 objects, token records, or Worker Secrets for
+`fc.polly.wang`.
