@@ -16,20 +16,36 @@ function endpoint(baseUrl: string) {
   return `${baseUrl.replace(/\/$/u, '')}/responses`
 }
 
+type ResponsesPayload = {
+  output_text?: unknown
+  output?: unknown
+}
+
 async function responseJson(response: Response) {
   if (!response.ok) throw new CopilotXError('CopilotX request failed')
   try {
-    return await response.json() as { output_text?: unknown }
+    return await response.json() as ResponsesPayload
   } catch {
     throw new CopilotXError('CopilotX returned invalid JSON')
   }
 }
 
-function responseText(payload: { output_text?: unknown }) {
-  if (typeof payload.output_text !== 'string' || !payload.output_text.trim()) {
-    throw new CopilotXError('CopilotX returned an empty response')
+function responseText(payload: ResponsesPayload) {
+  if (typeof payload.output_text === 'string' && payload.output_text.trim()) {
+    return payload.output_text
   }
-  return payload.output_text
+  if (Array.isArray(payload.output)) {
+    const text = payload.output.flatMap((item) => {
+      if (!item || typeof item !== 'object' || !Array.isArray((item as { content?: unknown }).content)) return []
+      return (item as { content: unknown[] }).content.flatMap((part) => {
+        if (!part || typeof part !== 'object') return []
+        const value = part as { type?: unknown; text?: unknown }
+        return value.type === 'output_text' && typeof value.text === 'string' ? [value.text] : []
+      })
+    }).join('')
+    if (text.trim()) return text
+  }
+  throw new CopilotXError('CopilotX returned an empty response')
 }
 
 export class CopilotXClient {
@@ -38,7 +54,7 @@ export class CopilotXClient {
   private readonly model: string
 
   constructor(private readonly options: CopilotXOptions) {
-    this.fetcher = options.fetch ?? globalThis.fetch
+    this.fetcher = options.fetch ?? globalThis.fetch.bind(globalThis)
     this.baseUrl = options.baseUrl ?? DEFAULT_BASE_URL
     this.model = options.model ?? DEFAULT_MODEL
   }

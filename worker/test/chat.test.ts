@@ -1,8 +1,9 @@
 import { env, SELF } from 'cloudflare:test'
 import { Hono } from 'hono'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { registerChatRoutes } from '../src/chat/routes'
 import type { AuthEnvironment } from '../src/auth/middleware'
+import { CopilotXClient } from '../src/chat/copilotx'
 import { browserAuth, resetDatabase, seedContractCatalog } from './helpers'
 
 const origin = 'https://fc.test'
@@ -16,7 +17,7 @@ function sseEvents(body: string) {
   })
 }
 
-function fakeUpstream(options: { planner?: unknown; answer?: string[]; answerFrames?: string[]; answerNeverEnds?: boolean; status?: number } = {}) {
+function fakeUpstream(options: { planner?: unknown; plannerEnvelope?: 'legacy' | 'responses'; answer?: string[]; answerFrames?: string[]; answerNeverEnds?: boolean; status?: number } = {}) {
   const requests: Request[] = []
   const signals: Array<AbortSignal | null | undefined> = []
   let answerCancelled = false
@@ -32,6 +33,17 @@ function fakeUpstream(options: { planner?: unknown; answer?: string[]; answerFra
       available_only: true,
     }
     if (requests.length === 1) {
+      if (options.plannerEnvelope === 'responses') {
+        return Response.json({
+          output_text: {},
+          output: [{
+            type: 'message',
+            role: 'assistant',
+            status: 'completed',
+            content: [{ type: 'output_text', annotations: [], logprobs: [], text: JSON.stringify(planner) }],
+          }],
+        })
+      }
       return Response.json({ output_text: JSON.stringify(planner) })
     }
     const encoder = new TextEncoder()
@@ -67,6 +79,45 @@ beforeEach(async () => {
 })
 
 describe('authenticated result-first chat', () => {
+  it('preserves the required receiver when using the Workers global fetch', async () => {
+    const originalFetch = globalThis.fetch
+    const planner = {
+      query: '会议椅',
+      category: '座椅',
+      site_id: 'site-beijing',
+      available_only: true,
+    }
+    vi.stubGlobal('fetch', function (this: unknown) {
+      if (this !== globalThis) throw new TypeError('Illegal invocation')
+      return Promise.resolve(Response.json({ output_text: JSON.stringify(planner) }))
+    })
+
+    try {
+      const client = new CopilotXClient({ apiKey, baseUrl: 'https://copilotx.test/v1' })
+      await expect(client.plan('北京有哪些会议椅？', ['座椅'], [
+        { id: 'site-beijing', name: '北京园区', city: '北京' },
+      ])).resolves.toEqual(planner)
+    } finally {
+      vi.stubGlobal('fetch', originalFetch)
+    }
+  })
+
+  it('accepts the standard Responses output array used by the deployed CopilotX planner', async () => {
+    const upstream = fakeUpstream({ plannerEnvelope: 'responses' })
+    const app = new Hono<AuthEnvironment>()
+    registerChatRoutes(app, { fetch: upstream.fetch, apiKey, baseUrl: 'https://copilotx.test/v1' })
+    const auth = await browserAuth('viewer')
+
+    const response = await app.fetch(new Request(`${origin}/api/agent/query/stream`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...auth.headers },
+      body: JSON.stringify({ message: '北京有哪些会议椅？' }),
+    }), testEnv())
+
+    expect(sseEvents(await response.text()).map(({ event }) => event)).toEqual([
+      'status', 'result', 'status', 'text_delta', 'text_delta', 'done',
+    ])
+  })
+
   it('emits a validated catalog result before incremental grounded answer deltas and discards client model controls', async () => {
     const upstream = fakeUpstream()
     const app = new Hono<AuthEnvironment>()
