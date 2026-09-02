@@ -151,6 +151,34 @@ describe('authenticated result-first chat', () => {
     expect(JSON.stringify(events)).not.toContain(apiKey)
   })
 
+  it('drops a generic catalog noun so a site-only question does not overfilter results', async () => {
+    const upstream = fakeUpstream({
+      planner: {
+        query: '可共享家具',
+        category: null,
+        site_id: 'site-shanghai',
+        available_only: true,
+      },
+    })
+    const app = new Hono<AuthEnvironment>()
+    registerChatRoutes(app, { fetch: upstream.fetch, apiKey, baseUrl: 'https://copilotx.test/v1' })
+    const auth = await browserAuth('viewer')
+
+    const response = await app.fetch(new Request(`${origin}/api/agent/query/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...auth.headers },
+      body: JSON.stringify({ message: '上海有哪些可共享家具？' }),
+    }), testEnv())
+
+    expect(response.status).toBe(200)
+    const result = sseEvents(await response.text()).find(({ event }) => event === 'result')?.data
+    expect(result).toMatchObject({
+      total: 2,
+      applied_query: null,
+      applied_filters: { site_id: 'site-shanghai', available_only: true },
+    })
+  })
+
   it('returns only a sanitized terminal error when the upstream planner fails', async () => {
     const upstream = fakeUpstream({ status: 502 })
     const app = new Hono<AuthEnvironment>()

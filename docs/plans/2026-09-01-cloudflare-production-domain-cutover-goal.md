@@ -2,7 +2,7 @@
 
 **日期：** 2026-09-01
 
-**状态：** 执行中；Phase 0 已完成，等待用户授权 Phase 1
+**状态：** 已完成；Production 上线、稳定观察与 Preview 退役均通过（2026-09-02）
 
 **目标域名：** `https://fc.polly.wang`
 
@@ -171,95 +171,153 @@ Production 使用基础名称，非生产环境使用明确后缀。内部 bindi
 
 ### Phase 1：创建独立 Production 存储
 
-- [ ] 创建 D1 `furniture-center`，将 ID 写入 `worker/wrangler.jsonc` 的
+- [x] 创建 D1 `furniture-center`，将 ID 写入 `worker/wrangler.jsonc` 的
   `env.production.d1_databases`。
-- [ ] 创建私有 R2 `furniture-center-images`，写入
+- [x] 创建私有 R2 `furniture-center-images`，写入
   `env.production.r2_buckets`。
-- [ ] 保持 Images binding `IMAGES_TRANSFORM`。
-- [ ] 设置 `ENVIRONMENT=production` 和
+- [x] 保持 Images binding `IMAGES_TRANSFORM`。
+- [x] 设置 `ENVIRONMENT=production` 和
   `MCP_ALLOWED_HOSTS=fc.polly.wang`；禁止通配符。
-- [ ] 按文件顺序应用全部 D1 migrations，并确认没有 pending migration。
+- [x] 按文件顺序应用全部 D1 migrations，并确认没有 pending migration。
 
 ### Phase 2：配置生产 Secrets 和访问凭据
 
-- [ ] 通过 stdin 设置 `COPILOTX_API_KEY` 和 `SESSION_SIGNING_KEY` Worker Secrets。
-- [ ] 优先使用 FurnitureCenter 专用 CopilotX Key；Cloudflare 无法导出现有 Worker
+- [x] 通过私有、Git 忽略且权限为 `0600` 的临时 secrets 文件设置
+  `COPILOTX_API_KEY` 和 `SESSION_SIGNING_KEY` Worker Secrets；文件已删除。
+- [x] 使用 FurnitureCenter 专用 CopilotX Key；Cloudflare 无法导出现有 Worker
   Secret。如本地没有可用值，暂停并请用户在可信终端输入，不能在聊天中发送。
-- [ ] 生成独立的 Production viewer、admin、MCP 凭据，只将摘要及 role/label 写入
+- [x] 生成独立的 Production viewer、admin、MCP 凭据，只将摘要及 role/label 写入
   Production D1。
-- [ ] 验证本地凭据文件被 Git 忽略且权限为 `0600`。
-- [ ] 验证部署输出、终端历史、Git diff 和日志均不含明文或摘要。
+- [x] 验证本地凭据文件被 Git 忽略且权限为 `0600`。
+- [x] 验证本阶段输出、命令参数、Git diff 和 Wrangler 日志均不含明文或摘要。
+
+Wrangler 4.127.1 已实测拒绝向尚不存在的 Worker 单独写入 Secret。2026-09-02 的真实
+尝试进一步确认：`wrangler versions upload --secrets-file` 的 dry-run 虽能通过，但真实上传
+会被 Wrangler 拒绝，错误为“不能为尚不存在的 Worker 上传新版本，必须先运行 deploy”。
+这意味着“首次创建 Worker 但完全没有 deployment”的路径不可行。
+
+第一次尝试中，CopilotX `furniture-center` 专用 user 已创建为 `role=user`、300 次/日，Key 经
+`/v1/models` 返回 HTTP 200 验证；版本上传失败后，同一受控进程立即软删除该用户并删除
+临时 Secret 文件。刷新后 CopilotX 活跃用户为 0，Production Worker、version、deployment
+仍均不存在，没有残留外部资源。
+
+安全替代路径是在 Production 配置中同时设置 `workers_dev=false` 和
+`preview_urls=false`，保持 `routes` 为空，并显式用 `triggers.crons=[]` 覆盖顶层可继承的
+定时任务，再用 `wrangler deploy --secrets-file` 原子创建初始 deployment。Cloudflare 会把
+首个版本记为 100% deployment allocation，但没有 workers.dev、版本 Preview URL、Route、
+Custom Domain 或 Cron 调用入口，因此不会产生公开或定时请求。
+
+用户于 2026-09-02 明确授权该零入口首次部署。执行时重新创建专用 CopilotX
+`furniture-center` user（`role=user`、300 次/日），Key 经 `/v1/models` HTTP 200 验证后只
+进入 Worker Secret，没有持久化到仓库或本地客户端凭据文件。首次密封 deployment 已成功：
+Worker version 为 `c486019a-1e3a-4ee9-ab51-632bc0d56598`，deployment 为
+`e49c71df-3406-44ab-be26-46f871eac6cb`。私有临时 Secret 文件已删除。
+
+Cloudflare 远端状态随后逐项核验：`workers.dev` 和 Preview URLs 均为 disabled；Cron
+schedule、Workers Route、Custom Domain 均为 0；`fc.polly.wang` 仍无 A、AAAA、CNAME；
+基础 workers.dev URL 和该版本的版本化 Preview URL 均不可访问。版本元数据中的
+`has_preview=true` 只表示该版本具备 Preview 能力，不代表已公开；Cloudflare 的实际公开
+开关 `previews_enabled=false`。Phase 5 之前仍不得绑定 Custom Domain。
+
+Wrangler 4.127.1 源码在 Worker service lookup 返回 not-found 时主动阻止首次
+`versions upload`；Cloudflare 官方的
+[Deployment management](https://developers.cloudflare.com/workers/versions-and-deployments/deployment-management/#first-upload)
+也明确说明首次上传必须使用 C3 或 `wrangler deploy`。不得通过直接调用底层 API 绕过该
+首次部署约束。
 
 ### Phase 3：导入和核对正式数据
 
-- [ ] 从权威源生成新的、经过清理的 Production 导入包，不复用 Preview E2E 行。
-- [ ] 导入分类、园区、家具、库存、图片元数据和需要保留的业务历史。
-- [ ] 上传 R2 图片并验证 MIME、大小、对象键和 SHA-256。
-- [ ] 验证 D1 foreign keys、行数、每家具的园区分布和汇总数量。
-- [ ] 确认 R2 不公开，图片只能通过经过授权的 Worker 路径访问。
-- [ ] 保存一份本地 Git 忽略、`0600` 的预上线 D1 导出和校验清单。
-- [ ] 在 Preview 克隆或一次性测试资源上演练 D1 恢复：优先验证当前 Wrangler 支持的
+- [x] 从权威源生成新的、经过清理的 Production 导入包，不复用 Preview E2E 行；用户已于
+  2026-09-02 确认 3 园区、4 家具、5 库存、4 图片的清单和排除范围。
+- [x] 导入分类、园区、家具、库存、图片元数据和需要保留的业务历史。
+- [x] 上传 R2 图片并验证 MIME、大小、对象键和 SHA-256。
+- [x] 验证 D1 foreign keys、行数、每家具的园区分布和汇总数量。
+- [x] 确认 R2 不公开，图片只能通过经过授权的 Worker 路径访问。
+- [x] 保存一份本地 Git 忽略、`0600` 的预上线 D1 导出和校验清单。
+- [x] 在一次性测试资源上演练 D1 恢复：当前 Wrangler 支持 Time Travel/bookmark，并完成
+  “导入 → 恢复为空库 → 重新导入 → 对账”流程。备用方案仍是
   Time Travel/bookmark；如不可用，则验证“导出到新 D1、核对、切换 binding、重新部署”
   流程。把当时可用的精确命令和结果写入脱敏验证记录。
-- [ ] 为 R2 生成完整对象 manifest，并验证从本地权威图片包重新上传到一次性测试桶后，
+- [x] 为 R2 生成完整对象 manifest，并验证从本地权威图片包重新上传到一次性测试桶后，
   object key、MIME、大小和 SHA-256 全部一致。首次上线窗口不得删除原 R2 对象。
-- [ ] 在进入 Phase 5 前完成 `production-verification.md` 的“切换前回滚”章节，写入并
-  核对 Worker、D1、R2 当次实际可执行的恢复步骤、目标 ID 和验证结果。
+- [x] 在进入 Phase 5 前完成 `production-verification.md` 的“切换前回滚”章节。D1/R2
+  已实际演练并填写；Worker 必须等 Phase 4 产生新版本后再执行回滚演练。
+
+首次 Production D1 导入暴露出导出器生成了远端 D1 拒绝的显式事务包装。自动回滚已成功，
+Production 回到 0 条业务数据。随后按 TDD 新增回归测试、移除事务包装，并证明新包与用户
+确认的 manifest 及 4 个图片对象完全一致，仅 SQL 包装不同。修复包先在一次性 D1 完成真实
+远端导入、Time Travel 恢复和重新导入，之后才用于 Production。
+
+Phase 3 收尾结果：Production D1 为 3 分类、3 园区、4 家具、4 图片元数据、5 库存、0
+调拨/调整/审计，外键违规为 0，Preview E2E 行为 0；三条访问凭据仍有效。Production R2
+四个 JPEG 的 key、MIME、大小和 SHA-256 均通过 API 回读核验，`r2.dev` 关闭且无 Custom
+Domain。一次性 D1/R2 资源均已删除；Worker 仍无公网、Preview、Route、Cron 或 Custom
+Domain 入口。
 
 ### Phase 4：先部署 Production Worker，不绑定正式域名
 
-- [ ] 构建前端并以 `--env production` 部署 `furniture-center`。
-- [ ] 记录完整 Worker version ID 和前一版本 ID。
-- [ ] 明确启用并记录 Production `workers.dev` 预检入口；通过它验证 `/health`、静态资源、
+- [x] 重新构建并核验前端/Worker；启用受控 `workers.dev` 预检入口并部署或继续使用已验证
+  的 Production version。
+- [x] 将 Phase 2 密封版本记为明确回滚点，并记录 Phase 4 完整 version ID。
+- [x] 明确启用并记录 Production `workers.dev` 预检入口；通过它验证 `/health`、静态资源、
   登录/API 鉴权和绑定存在性。Production MCP 的 Host 校验只接受 `fc.polly.wang`，因此
   MCP 验收明确推迟到 Phase 6，不临时放宽 allow-list。
-- [ ] 执行 `wrangler deploy --dry-run --env production`，并在首次部署后从 Dashboard
+- [x] 执行 `wrangler deploy --dry-run --env production`，并在首次部署后从 Dashboard
   逐项核对 Assets、D1、R2、Images、Cron、compatibility date/flags、vars 和 Secret names；
   不假设所有顶层配置都会被环境自动继承。
-- [ ] 确认 Production 使用 Production D1/R2，而 Preview 仍指向 Preview D1/R2。
-- [ ] 验证任何未授权的 API、图片和 MCP 请求均被拒绝。
+- [x] 确认 Production 使用 Production D1/R2，而 Preview 仍指向 Preview D1/R2。
+- [x] 验证任何未授权的 API、图片和 MCP 请求均被拒绝。
 
 如果 Production Worker 首次部署没有安全的受控入口，可在同一次受控切换窗口内完成
 Phase 4 和 Phase 5，但必须先完成所有静态检查、数据检查和 Secret/Binding 检查。
 
 ### Phase 5：绑定 `fc.polly.wang`
 
-- [ ] 再次确认 DNS 和 Worker Custom Domain 无冲突。
-- [ ] 在 `env.production.routes` 加入
+- [x] 再次确认 DNS 和 Worker Custom Domain 无冲突。
+- [x] 在 `env.production.routes` 加入
   `{ "pattern": "fc.polly.wang", "custom_domain": true }`。
-- [ ] 部署经过 Phase 4 验证的同一代码版本。
-- [ ] 在 Dashboard 确认它显示在 `Custom domains`，而不是 `Routes`。
-- [ ] 确认 Cloudflare 自动生成域名所需 DNS 状态和边缘证书。
-- [ ] 验证 HTTP 跳转与 HTTPS；不得修改 Zone 全局 SSL/TLS 模式。
-- [ ] 最多等待 30 分钟让 Custom Domain 状态、DNS 和证书进入可用状态；超时则暂停切换并
+- [x] 部署经过 Phase 4 验证的同一代码版本。
+- [x] 在 Dashboard 确认它显示在 `Custom domains`，而不是 `Routes`。
+- [x] 确认 Cloudflare 自动生成域名所需 DNS 状态和边缘证书。
+- [x] 验证 HTTP 跳转与 HTTPS；不得修改 Zone 全局 SSL/TLS 模式。
+- [x] 最多等待 30 分钟让 Custom Domain 状态、DNS 和证书进入可用状态；超时则暂停切换并
   核查域名状态和证书错误，不重复部署、不创建临时 A/CNAME，也不改全局 SSL。
 
 ### Phase 6：生产 smoke gate
 
-- [ ] 未登录访问显示凭据登录页，且不会泄漏目录数据。
-- [ ] Viewer 可浏览、搜索、查看地图/详情/图片、使用 Chat、退出登录。
-- [ ] Viewer 对 Site、Inventory、Transfer 等管理接口收到 `403`。
-- [ ] Admin 可管理园区与家具，并完成一次可回退或明确标记的生产验收操作。
-- [ ] Chat SSE 首包和完整响应正常，CopilotX 错误经过脱敏。
-- [ ] 图片原图、缩略图、弹窗大图、授权边界和 R2 隐私正确。
-- [ ] MCP 通过独立 Bearer Token 初始化，仅暴露约定的只读工具；Host allow-list 接受
+- [x] 未登录访问显示凭据登录页，且不会泄漏目录数据。
+- [x] Viewer 可浏览、搜索、查看地图/详情/图片、使用 Chat、退出登录。
+- [x] Viewer 对 Site、Inventory、Transfer 等管理接口收到 `403`。
+- [x] Admin 可管理园区与家具，并完成一次可回退或明确标记的生产验收操作。
+- [x] Chat SSE 首包和完整响应正常，CopilotX 错误经过脱敏。
+- [x] 图片原图、缩略图、弹窗大图、授权边界和 R2 隐私正确。
+- [x] MCP 通过独立 Bearer Token 初始化，仅暴露约定的只读工具；Host allow-list 接受
   `fc.polly.wang` 并拒绝伪造 Host。
-- [ ] 验证 CSRF、无效/过期/撤销 Token、Cookie flags、Origin/CORS 和 rate limit。
-- [ ] 在桌面和窄窗口分别完成浏览器旅程，控制台无应用错误。
-- [ ] Preview URL 继续可用，且 Preview 数据没有因生产操作改变。
-- [ ] 继续完成 `docs/deployment/production-verification.md` 的生产 smoke 章节，仅记录
+- [x] 验证 CSRF、无效/过期/撤销 Token、Cookie flags、Origin/CORS 和 rate limit。
+- [x] 在桌面和窄窗口分别完成浏览器旅程，控制台无应用错误。
+- [x] Preview URL 继续可用，且 Preview 数据没有因生产操作改变。
+- [x] 继续完成 `docs/deployment/production-verification.md` 的生产 smoke 章节，仅记录
   时间、版本、资源名、脱敏 ID、计数和测试结果。
 
 ### Phase 7：稳定观察和收尾
 
-- [ ] smoke gate 后至少连续观察 30 分钟，检查错误率、CPU、请求量、D1/R2 使用量和
+- [x] smoke gate 后至少连续观察 30 分钟，检查错误率、CPU、请求量、D1/R2 使用量和
   Chat 上游错误。`/health` 非 2xx、核心旅程失败、持续 5xx、数据核对失败或任何敏感信息
   泄漏都阻止完成；数据损坏或泄漏触发立即隔离公开入口。
-- [ ] 根据免费额度启用不含敏感数据的 Workers Logs/Trace 采样，并记录保留策略。
-- [ ] 确认上一 Worker 版本、预上线 D1 导出和 R2 校验清单仍可用于回滚。
-- [ ] 保存 `wrangler.jsonc`、Runbook 和脱敏验证记录；可在已授权范围内创建本地 commit，
+- [x] 根据免费额度配置不含敏感数据的 Workers Logs/Trace 策略并记录保留边界；启用 5%
+  错误/自定义日志采样且关闭 invocation logs，因 Trace 会记录 `url.query` 与
+  `db.query.text` 而显式禁用其持久化。
+- [x] 确认上一 Worker 版本、预上线 D1 导出和 R2 校验清单仍可用于回滚。
+- [x] 保存 `wrangler.jsonc`、Runbook 和脱敏验证记录；可在已授权范围内创建本地 commit，
   但未经明确授权不得 push；不提交任何本地凭据文件。
-- [ ] 只有所有 Definition of Done 项通过后，才将 Goal 标记为 complete。
+- [x] 只有所有 Definition of Done 项通过后，才将 Goal 标记为 complete。
+
+最终观察窗口为 `2026-09-02T04:07:48Z`–`04:39:30Z`：32 个每分钟 `/health`
+样本全部 HTTP 200。Cloudflare Analytics 在对应窗口记录 78 success、0 errors、8
+subrequests，成功请求 CPU p50 为 3.088ms、p99 为 57.833ms；实时错误监听未记录错误事件。
+Production D1 保持 3 分类、3 园区、4 家具、5 库存、0 调拨、4 审计且外键无违规，R2
+保持 4 个对象、约 592kB。Worker version、D1 Time Travel bookmark 与私有 R2 重建包均
+重新核验可用。
 
 ### Phase 8：Production 稳定后退役 Preview（已获条件授权）
 
@@ -278,6 +336,14 @@ SHA-256，并放在 Git 忽略、权限 `0600` 的本地目录；还要证明 Pr
 此授权不包括删除 Preview 本地凭据文件、访问 Token 记录、Cloudflare User/Account API
 Token、Tunnel、`polly-chat-proxy`、Pages 项目或其他 Cloudflare 资源。Token 治理仍需独立
 授权。删除后的 Preview 云端资源不能原地恢复，只能根据已验证的本地导出和对象包重新创建。
+
+执行结果：新的 Preview 恢复包保存在 Git 忽略、mode-`0600` 的
+`.migration/preview-retirement-backup-20260902T044056Z/`。D1 全量导出包含 17 张表，导入
+一次性远端 D1 后逐表计数和外键核对通过，再导出与原文件字节完全一致；测试 D1 随后删除。
+R2 远端 `object_count=4`，4 个互异对象键与 D1 元数据一一对应，本地文件的 MIME、大小和
+SHA-256 全部匹配。证明 `fc.polly.wang` 和 Production version 不引用 Preview 后，已按
+Worker → D1 → R2 顺序删除三个精确目标，每一步后的 Production health 与数据检查均通过。
+Cloudflare API Token、Tunnel、其他 Worker/Pages、本地凭据均未删除。
 
 ## 6. 独立的 Token 治理阶段
 
@@ -301,6 +367,29 @@ Token、Tunnel、`polly-chat-proxy`、Pages 项目或其他 Cloudflare 资源。
 任何撤销失败、Tunnel 断连或部署认证失败都应立即停止后续清理。在旧 Token 尚未撤销时
 回切旧配置；Token 一旦撤销或删除，原 Secret 通常不能恢复，只能创建新 Token 并重新
 配置消费者，因此不能把“恢复已删除凭据”写入回滚方案，也不进行批量重试。
+
+### 2026-09-02 执行记录
+
+经用户单独确认后，已在 Cloudflare User API Tokens 页面完成本阶段中重复 Tunnel Token
+的治理，过程中未读取或记录任何 Token Secret：
+
+- 将仍在使用的两条 Token 分别重命名为
+  `cloudflared-admin-polly.wang-local` 和
+  `cloudflared-admin-baoli.wang-local`，原有四项权限、Account 范围和对应 Zone 范围均保持
+  不变；
+- 在删除前、重命名后及删除后，分别使用本机 `cert.pem` 与 `cert.baoli.pem` 执行只读
+  `cloudflared tunnel list`，两者均能列出既有 `loiter` Tunnel；
+- 逐条删除两条 `polly.wang`、一条 `baoli.wang` 且 `Last used` 为 `-` 的重复 Token；
+  每次删除后都重新读取列表，最终 User API Token 数量从 8 条降为 5 条；
+- 未修改 `daitianjun-com build token`、`Edit Cloudflare Workers`、
+  `GitHub Actions - Purge Cache`、任何 Account API Token、Global API Key、Tunnel、Worker、
+  Pages 项目或本地凭据文件；
+- 清理后 `fc.polly.wang`、`loiter.polly.wang`、`daitianjun.com` 与
+  `daitianjun-com.pages.dev` 均返回 HTTP 200；`chat.polly.wang/v1/messages` 在无凭据请求下
+  返回 HTTP 403，证明 `polly-chat-proxy` 路由仍在且鉴权仍生效。
+
+剩余三个 User API Token 的最小权限替换与可能的后续治理仍是独立任务，不能依据本次授权
+继续删除或轮换。
 
 ## 7. 回滚边界
 

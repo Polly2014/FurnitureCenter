@@ -9,6 +9,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -219,6 +220,22 @@ def test_export_is_deterministic_escaped_and_excludes_credentials(tmp_path: Path
     assert (output / "r2" / image["object_key"]).read_bytes() == PNG_BYTES
 
 
+def test_export_omits_transaction_wrappers_rejected_by_remote_d1(tmp_path: Path) -> None:
+    """Reintroducing an explicit transaction would make the package fail in remote D1."""
+    _, output, _ = export_fixture(tmp_path)
+
+    statements = [
+        line.strip().upper()
+        for line in (output / "d1-import.sql").read_text().splitlines()
+    ]
+    forbidden = {"BEGIN;", "BEGIN TRANSACTION;", "COMMIT;"}
+    has_transaction_wrapper = any(
+        statement in forbidden or statement.startswith("SAVEPOINT ") for statement in statements
+    )
+    if has_transaction_wrapper:
+        pytest.fail("remote D1 import package contains an explicit transaction wrapper")
+
+
 def test_export_requires_explicit_staging_for_external_image_urls(tmp_path: Path) -> None:
     """A network-fetch fallback would make a migration non-deterministic and unsafe."""
     source = tmp_path / "source.db"
@@ -297,7 +314,7 @@ def test_verifier_reconciles_target_and_rejects_image_or_inventory_mismatches(
     source, output, _ = export_fixture(tmp_path)
     target = tmp_path / "target.db"
     apply_target_schema(target)
-    with sqlite3.connect(target) as connection:
+    with closing(sqlite3.connect(target)) as connection:
         connection.executescript((output / "d1-import.sql").read_text())
 
     report = approved_path(tmp_path, "reconciliation.json")
@@ -322,7 +339,7 @@ def test_verifier_reconciles_target_and_rejects_image_or_inventory_mismatches(
     assert "must-not-export" not in report.read_text()
 
     (output / "r2" / "furniture" / "fur-1" / "images" / "img-1.png").write_bytes(b"changed")
-    with sqlite3.connect(target) as connection:
+    with closing(sqlite3.connect(target)) as connection:
         connection.execute("UPDATE inventory SET quantity_available = 11 WHERE id = 'inv-bj'")
         connection.commit()
     failed_report = approved_path(tmp_path, "failed-reconciliation.json")
@@ -356,7 +373,7 @@ def test_export_rejects_unsafe_identifiers(tmp_path: Path, unsafe_value: str) ->
     (asset_root / "media").mkdir()
     (asset_root / "media" / "chair.png").write_bytes(PNG_BYTES)
     create_source_db(source)
-    with sqlite3.connect(source) as connection:
+    with closing(sqlite3.connect(source)) as connection:
         connection.execute("UPDATE furniture_images SET id = ?", (unsafe_value,))
         connection.commit()
     result = run(
@@ -417,7 +434,7 @@ def test_verifier_rejects_unapproved_existing_and_input_collision_reports(tmp_pa
     source, output, _ = export_fixture(tmp_path)
     target = tmp_path / "target.db"
     apply_target_schema(target)
-    with sqlite3.connect(target) as connection:
+    with closing(sqlite3.connect(target)) as connection:
         connection.executescript((output / "d1-import.sql").read_text())
     source_before = source.read_bytes()
     target_before = target.read_bytes()
@@ -499,7 +516,7 @@ def test_export_and_verifier_support_uri_reserved_database_names(tmp_path: Path)
     )
     target = tmp_path / "target ? # 中文.db"
     apply_target_schema(target)
-    with sqlite3.connect(target) as connection:
+    with closing(sqlite3.connect(target)) as connection:
         connection.executescript((output / "d1-import.sql").read_text())
     report = approved_path(tmp_path, "reserved-report.json")
     result = run(
@@ -541,7 +558,7 @@ def test_verifier_rejects_equal_count_migrated_record_substitution(
     source, output, _ = export_fixture(tmp_path)
     target = tmp_path / "target.db"
     apply_target_schema(target)
-    with sqlite3.connect(target) as connection:
+    with closing(sqlite3.connect(target)) as connection:
         connection.executescript((output / "d1-import.sql").read_text())
         connection.execute(statement)
         connection.commit()

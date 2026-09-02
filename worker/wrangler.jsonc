@@ -59,8 +59,43 @@
     },
     "production": {
       "name": "furniture-center",
+      "workers_dev": false,
+      "preview_urls": false,
+      "routes": [
+        { "pattern": "fc.polly.wang", "custom_domain": true }
+      ],
+      "triggers": { "crons": [] },
+      "observability": {
+        "logs": {
+          "enabled": true,
+          "head_sampling_rate": 0.05,
+          "invocation_logs": false,
+          "persist": true
+        },
+        "traces": {
+          "enabled": false,
+          "persist": false
+        }
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "furniture-center",
+          "database_id": "7640704c-3622-496a-bd00-861c1a9fe735",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "IMAGES",
+          "bucket_name": "furniture-center-images"
+        }
+      ],
       "images": { "binding": "IMAGES_TRANSFORM" },
-      "vars": { "ENVIRONMENT": "production" }
+      "vars": {
+        "ENVIRONMENT": "production",
+        "MCP_ALLOWED_HOSTS": "fc.polly.wang"
+      }
     }
   }
 }

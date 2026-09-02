@@ -38,9 +38,10 @@ and its contents must never be printed or committed. Worker rollback does not
 reverse migration 0007 or the authenticated E2E rows described below.
 
 The authenticated V2 smoke gate passed on 2026-09-01 with the separately issued
-admin, viewer, and MCP credentials. Production remains intentionally untouched;
-passing Preview does not itself authorize production resources or the
-`fc.polly.wang` binding.
+admin, viewer, and MCP credentials. At that checkpoint Production was still
+intentionally untouched; passing Preview did not itself authorize production
+resources or the `fc.polly.wang` binding. The later authorized cutover is recorded
+in the Production checkpoints below.
 
 The production candidate is now regenerated from the clean V2 local database and
 documented in [Production data manifest](production-data-manifest.md). Do not use the
@@ -159,6 +160,168 @@ credentials. Future production issuance must use a separately generated,
 separately stored local file and newly inserted production D1 records after the
 preview gate passes.
 
+## Authorized local Production credentials
+
+Production uses the same fixed-path, atomic-write safety contract as Preview but
+has distinct variable names and a distinct ignored file. The generator refuses
+an output override or overwrite, creates three unique `ms-fc-` values with at
+least 256 bits of entropy, and prints only the destination path:
+
+```sh
+python scripts/generate_production_credentials.py
+chmod 600 .env.production-credentials.local
+git check-ignore -v .env.production-credentials.local
+```
+
+The variables are `FC_PRODUCTION_VIEWER_TOKEN`, `FC_PRODUCTION_ADMIN_TOKEN`, and
+`FC_PRODUCTION_MCP_TOKEN`. Insert only their SHA-256 digests with labels
+`production-browser-viewer`, `production-admin`, and `production-mcp-client`;
+never reuse the Preview file, token records, IDs, or digests. If the file already
+exists, the generator must fail rather than rotate or replace it.
+
+Wrangler 4.127.1 cannot use `secret put` before the Worker exists, and a real
+`versions upload` cannot create the first Worker version even though its dry-run
+succeeds. The first version therefore requires `deploy`; keep that deployment
+unreachable instead of silently opening an ingress:
+
+1. create a dedicated CopilotX `user` key for `furniture-center` and capture its
+   one-time plaintext only in the trusted provisioning process;
+2. generate a fresh session-signing value and place both values in a private,
+   ignored, mode-`0600` temporary secrets file;
+3. set both `workers_dev=false` and `preview_urls=false` in `env.production`,
+   keep Production routes empty, and set `triggers.crons=[]` so the inheritable
+   top-level schedule cannot invoke the sealed Worker;
+4. run `wrangler deploy --secrets-file <private-file> --env production` only in a
+   separately authorized window to create the initial zero-ingress deployment;
+5. remove the exact temporary file in `finally`, then verify only the two Secret
+   names, version ID, bindings, absence of public URLs/routes, and absence of
+   Cron schedules;
+6. do not expose `workers.dev` or bind the Custom Domain until the separately
+   authorized public-entry phase.
+
+Use CopilotX role `user` with an explicit finite daily quota (the initial
+Production recommendation is 300 requests/day). If CopilotX user creation
+succeeds but the Worker version upload fails, immediately soft-delete only the
+new `furniture-center` user; do not retain its plaintext Key or fall back to the
+global admin Key. Retry later with a newly issued dedicated Key.
+
+Production sets `preview_urls=false`, so the uploaded version has no version
+Preview URL, and `workers_dev=false`, so the initial deployment has no
+workers.dev ingress. It also overrides the otherwise inherited Cron list with
+an empty list. Cloudflare still records the first version as the deployment's
+100% allocation, but no public or scheduled trigger can invoke it. The first
+upload requirement is documented by Cloudflare under
+[Deployment management / First upload](https://developers.cloudflare.com/workers/versions-and-deployments/deployment-management/#first-upload).
+Never persist the CopilotX user Key in the repository credential file; that
+file contains only the three FurnitureCenter client credentials.
+
+### Sealed Production checkpoint (2026-09-02)
+
+The separately authorized first Production deployment completed with version
+`c486019a-1e3a-4ee9-ab51-632bc0d56598` and deployment
+`e49c71df-3406-44ab-be26-46f871eac6cb`. It has the Production D1/R2/Images/
+Assets bindings, `ENVIRONMENT=production`, `MCP_ALLOWED_HOSTS=fc.polly.wang`,
+and the two expected Worker Secret names. The dedicated CopilotX user has role
+`user` and a 300-request daily quota; its one-time Key was verified before being
+placed only in the Worker Secret. No Secret value is retained in the repository
+or the local client credential file, and the temporary secrets file was removed.
+
+Cloudflare's remote script and Production-environment subdomain APIs both report
+`enabled=false` and `previews_enabled=false`. Cron schedules, Workers Routes,
+and Custom Domains each have count zero. The base workers.dev URL and the
+versioned Preview URL are unreachable, while `fc.polly.wang` still has no A,
+AAAA, or CNAME record. A version may report `metadata.has_preview=true` even
+when it is sealed: that is version capability metadata. Public availability is
+controlled by `previews_enabled`; Cloudflare's
+[Preview URLs documentation](https://developers.cloudflare.com/workers/versions-and-deployments/preview-urls/)
+states that disabling Preview URLs disables both versioned and aliased Preview
+routing.
+
+At checkpoint close, all three Production client credential labels were active,
+while the six catalog/inventory/transfer business tables were still empty. No
+Phase 3 data import occurred during this deployment step.
+
+The user separately confirmed the 3-site, 4-furniture, 5-inventory-position,
+4-image Production data manifest and the exclusion of all Preview E2E rows.
+This checkpoint did not itself authorize Phase 3. The user later authorized the
+separate data/recovery phase described below. It still did not authorize
+workers.dev exposure, Custom Domain binding, Preview retirement, or push.
+
+### Production data and recovery checkpoint (2026-09-02)
+
+Before import, export the complete Production D1 to an ignored mode-`0600` file
+and capture a Time Travel point. Wrangler prints a one-hour signed download URL
+during `d1 export`; redirect that command's complete output to a private
+mode-`0600` operator log and never paste the URL into chat, documentation, CI
+output, or a commit. The SQL export can contain access-token digests even though
+it cannot contain Worker Secrets.
+
+The first authorized Production import revealed that the exporter wrapped its
+statements in an explicit transaction, which remote D1 rejects. The automatic
+rollback restored the zero-business-row state. A regression test now requires
+the generated D1 package to omit explicit transaction wrappers. The regenerated
+package at `.migration/production-baseline-v2-d1safe-20260902/` has the same
+manifest and image bytes as the user-approved package; only the rejected SQL
+wrapper was removed.
+
+Before retrying Production, the package was proven against disposable D1
+`furniture-center-d1-restore-test-20260902-0310`: all migrations and the import
+passed, Time Travel restored the database to its empty post-migration state, and
+a second import reconciled again. The disposable database was then deleted.
+Production now contains 3 categories, 3 sites, 4 furniture records, 4 image
+metadata rows, 5 inventory positions, and no transfer/adjustment/audit rows.
+Foreign-key violations and Preview E2E rows are both zero, while all three
+Production client credential labels remain active.
+
+All four JPEGs were uploaded to private Production R2 and read back through the
+Cloudflare object API. Their keys, MIME types, byte sizes, and SHA-256 values
+matched the ignored manifest without recording digest values here. A disposable
+R2 bucket rebuilt and verified the same four objects and was then emptied and
+deleted. Production `r2.dev` remains disabled and has no R2 Custom Domain.
+
+The Phase 3 D1 pre-import export is
+`.migration/production-phase3-preimport-20260902T030446Z.sql`; keep it mode
+`0600` and Git-ignored. Keep the D1-safe package and its R2 bytes under the same
+permissions. Do not delete or overwrite the current Production R2 objects during
+the first cutover window.
+
+### Production cutover checkpoint (2026-09-02)
+
+The controlled `workers.dev` preflight used version
+`7e067725-fbac-47f6-8123-fcca9e5e43ea`. After the authenticated preflight, an
+actual Worker recovery drill rolled back to the sealed version
+`c486019a-1e3a-4ee9-ab51-632bc0d56598`, then restored the verified application as
+version `c73e33c5-6e71-44bc-a6f8-110c8bed1db6`. Health, bindings, Secret names,
+and Production data counts remained intact throughout; Worker rollback did not
+change D1 or R2.
+
+`fc.polly.wang` was then attached as a Worker Custom Domain with version
+`e7bb1305-f822-4d1d-a722-5b8fcde16427`. Do not add a manual A/AAAA/CNAME or a
+Workers Route for this hostname. HTTPS `/health` returned 200, HTTP redirected
+to HTTPS, and the Cloudflare-managed certificate SAN explicitly included
+`fc.polly.wang`.
+The Production workers.dev and version Preview URL switches were disabled after
+the cutover.
+
+Production smoke exposed one Chat planner defect: a generic catalog phrase such
+as `可共享家具` was incorrectly retained as a full-text query even after the
+planner had resolved the Shanghai site. The regression test failed before the
+fix and passed after generic-only catalog terms were normalized to no text
+query. Version `28f6317c-9ce8-4e4e-93af-0ef59d1741c6` returned the two expected
+Shanghai listings on the formal domain. The complete Viewer, Admin, Chat,
+image/lightbox, map, MCP, CSRF, Origin/Host, Token lifecycle, rate-limit, desktop,
+and 760px browser journeys are recorded in
+[Production verification](production-verification.md).
+
+Production observability is intentionally privacy-minimized. Version
+`94e283de-4531-41dd-a6e7-2c0d3140ec5c` persists a 5% sample of custom/error logs
+with invocation logs disabled. It explicitly disables persistent traces because
+Cloudflare automatic traces include `url.query` and `db.query.text`, while the
+current catalog API can place user-entered search text in a query string. The
+Free-plan retention recorded at cutover is three days. Reconsider tracing only
+after sensitive URL fields are removed or a proven field-redaction control is
+available.
+
 ## Verification and rollback
 
 ### V2 authenticated Preview evidence (2026-09-01)
@@ -249,3 +412,27 @@ export plus a complete local R2 object package/manifest. Prove Production bindin
 D1, then R2, rerunning Production health checks after each step. Stop on the first failure.
 This authorization does not cover any User/Account API Token, Tunnel, other Worker,
 Pages project, token record, or local credential file.
+
+### Retirement result (2026-09-02)
+
+The Production gate passed and the three exact Preview resources were retired in the
+required Worker → D1 → R2 order. The recovery package is stored locally under the ignored,
+mode-`0600` directory
+`.migration/preview-retirement-backup-20260902T044056Z/`.
+
+The D1 export contains all 17 application tables. It was imported into a disposable remote
+D1, reconciled table by table with zero foreign-key violations, and re-exported byte-for-byte
+identically before the disposable database was deleted. The R2 package contains all four
+objects reported by the remote bucket; each key, MIME type, byte size, dimensions, and
+SHA-256 matches D1 metadata and the private manifest.
+
+After each deletion, `https://fc.polly.wang/health` and the relevant Production bindings or
+data were rechecked. The final Production regression authenticated as Viewer, returned four
+available catalog items and four image references, fetched a real JPEG from the Production
+R2 binding, and logged out successfully. The old unauthenticated Preview commands in the
+historical verification section above are no longer expected to succeed.
+
+No Cloudflare API Token, Tunnel, other Worker/Pages project, local credential file, or
+Production resource was deleted. Recreating Preview now requires a new Worker/D1/R2 set and
+an explicit restore from the private package; the deleted resources cannot be restored in
+place.

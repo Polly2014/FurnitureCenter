@@ -2,7 +2,7 @@
 
 **生成时间：** 2026-09-01T15:42:23Z
 
-**状态：** 等待用户确认；未经确认不得执行 Phase 3 导入
+**状态：** 用户已确认，Phase 3 已按本清单导入并完成远端对账
 
 **目标环境：** Cloudflare Production（D1 `furniture-center`、R2 `furniture-center-images`）
 
@@ -12,9 +12,11 @@
 本地 schema 升级，包含园区启停、库存批次关闭状态和不可变调拨记录结构；它保留的是
 Preview E2E 操作之前的干净业务基线，不从当前 Preview 数据库整库复制。
 
-生成的本地候选包位于
-`.migration/production-baseline-v2-20260901/`。目录权限为 `0700`，目录和内容均被
-Git 忽略。候选包只用于后续经过授权的导入，不提交到仓库。
+实际导入包位于 linked worktree 的
+`.migration/production-baseline-v2-d1safe-20260902/`。目录权限为 `0700`，文件权限为
+`0600`，全部被 Git 忽略。它与用户确认的
+`.migration/production-baseline-v2-20260901/` manifest 和 4 个图片对象完全一致；唯一变化
+是移除了 Cloudflare D1 远端导入不接受的显式事务包装。两个包均不提交到仓库。
 
 ## 2. 保留与排除规则
 
@@ -71,7 +73,7 @@ Git 忽略。候选包只用于后续经过授权的导入，不提交到仓库�
 | `image-shelf` | `furniture/furniture-shelf/images/image-shelf.jpg` | image/jpeg | 206051 | 1200×830 |
 
 四个对象的本地文件大小和内容摘要均与候选 manifest 一致。本文档不记录摘要值；Phase 3
-上传后需对每个 R2 对象重新核验 MIME、字节数和 SHA-256。
+已从 Production R2 逐个回读对象并重新核验 MIME、字节数和 SHA-256，4/4 通过。
 
 ## 6. V2 兼容性与本地对账
 
@@ -87,16 +89,21 @@ Git 忽略。候选包只用于后续经过授权的导入，不提交到仓库�
 - 四张图片的元数据、字节数和内容摘要逐项一致；
 - 对账结果 `ok=true`，差异数为 0。
 
+首次远端导入发现旧导出器的显式事务包装与 Cloudflare D1 不兼容。新增回归测试先在旧实现
+上失败，移除包装后通过；全部迁移测试通过。修复包随后在一次性 D1 完成 migrations、首次
+导入、Time Travel 恢复为空库和重新导入，最终 Production D1 的八张业务表、五条库存和
+外键再次与本清单一致。
+
 本地脱敏对账结果位于
 `.migration/production-reconciliation-v2-20260901.json`，同样被 Git 忽略。
 
-## 7. 用户确认门
+## 7. 用户确认记录
 
-在 Phase 3 之前，请确认：
+用户已于 2026-09-02 确认：
 
 1. Production 就从上述 3 园区、4 家具、5 库存位置、4 图片的干净基线开始；
 2. Preview 中现有的 E2E 园区、测试家具、测试调拨和审计记录全部不进入 Production；
 3. 当前没有必须追加到 Production 的真实调拨历史。
 
-确认本清单只批准未来的正式数据来源，不等于批准创建资源、写入凭据、导入、部署或绑定
-域名；这些操作仍按 Goal 的阶段门分别授权。
+用户随后单独批准了 Phase 3，Production D1/R2 已按本清单导入。本次授权和完成结果仍不
+包括开放 workers.dev、绑定域名、删除 Preview 或 push；这些操作继续按 Goal 的阶段门执行。

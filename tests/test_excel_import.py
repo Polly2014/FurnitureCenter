@@ -46,32 +46,37 @@ def test_excel_import_preserves_attributes_provenance_and_image_status(tmp_path:
     workbook_path = tmp_path / "inventory.xlsx"
     make_workbook(workbook_path)
     engine = create_engine(f"sqlite:///{tmp_path / 'import.db'}")
-    Base.metadata.create_all(engine)
-    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    try:
+        Base.metadata.create_all(engine)
+        session_factory = sessionmaker(bind=engine, expire_on_commit=False)
 
-    with session_factory() as session:
-        preview = import_workbook(session, workbook_path)
-        assert preview.rows_seen == 2
-        assert preview.quantity_imported == 44
-        assert preview.images_embedded == 0
-        assert session.scalar(select(func.count(FurnitureRecord.id))) == 0
+        with session_factory() as session:
+            preview = import_workbook(session, workbook_path)
+            assert preview.rows_seen == 2
+            assert preview.quantity_imported == 44
+            assert preview.images_embedded == 0
+            assert session.scalar(select(func.count(FurnitureRecord.id))) == 0
 
-        report = import_workbook(session, workbook_path, dry_run=False, replace_catalog=True)
-        assert report.rows_imported == 2
-        assert report.categories_imported == 1
-        assert session.scalar(select(func.sum(InventoryRecord.quantity_available))) == 44
-        chair = session.scalar(select(FurnitureRecord).where(FurnitureRecord.name == "工位椅-Zody"))
-        assert chair is not None
-        assert chair.name_en == "Zody Task Chair"
-        assert chair.dimensions == "700*700*1000"
-        assert chair.color == "黑色"
-        assert chair.material == "布艺 / 金属"
-        assert chair.brand == "Haworth"
-        assert chair.source_workbook == "inventory.xlsx"
-        assert chair.source_sheet == "BJW"
-        assert chair.source_row == 3
-        assert chair.image_reference == "源文件图片引用失效"
-        assert '"数量": "40"' in chair.source_metadata
+            report = import_workbook(session, workbook_path, dry_run=False, replace_catalog=True)
+            assert report.rows_imported == 2
+            assert report.categories_imported == 1
+            assert session.scalar(select(func.sum(InventoryRecord.quantity_available))) == 44
+            chair = session.scalar(
+                select(FurnitureRecord).where(FurnitureRecord.name == "工位椅-Zody")
+            )
+            assert chair is not None
+            assert chair.name_en == "Zody Task Chair"
+            assert chair.dimensions == "700*700*1000"
+            assert chair.color == "黑色"
+            assert chair.material == "布艺 / 金属"
+            assert chair.brand == "Haworth"
+            assert chair.source_workbook == "inventory.xlsx"
+            assert chair.source_sheet == "BJW"
+            assert chair.source_row == 3
+            assert chair.image_reference == "源文件图片引用失效"
+            assert '"数量": "40"' in chair.source_metadata
+    finally:
+        engine.dispose()
 
 
 def test_manifest_import_attaches_recovered_image(tmp_path: Path) -> None:
@@ -103,14 +108,19 @@ def test_manifest_import_attaches_recovered_image(tmp_path: Path) -> None:
                 encoding="utf-8",
         )
         engine = create_engine(f"sqlite:///{tmp_path / 'manifest.db'}")
-        Base.metadata.create_all(engine)
-        session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+        try:
+                Base.metadata.create_all(engine)
+                session_factory = sessionmaker(bind=engine, expire_on_commit=False)
 
-        with session_factory() as session:
-                report = import_workbook(session, manifest, dry_run=False, replace_catalog=True)
-                chair = session.scalar(select(FurnitureRecord))
-                assert report.images_recovered == 1
-                assert report.sites_seen == 3
-                assert report.sites_imported == 3
-                assert chair is not None
-                assert chair.images[0].url == "/media/furniture/imported/bjw-row-003.png"
+                with session_factory() as session:
+                        report = import_workbook(
+                                session, manifest, dry_run=False, replace_catalog=True
+                        )
+                        chair = session.scalar(select(FurnitureRecord))
+                        assert report.images_recovered == 1
+                        assert report.sites_seen == 3
+                        assert report.sites_imported == 3
+                        assert chair is not None
+                        assert chair.images[0].url == "/media/furniture/imported/bjw-row-003.png"
+        finally:
+                engine.dispose()

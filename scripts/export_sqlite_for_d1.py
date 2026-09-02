@@ -453,7 +453,7 @@ def build_images(
 def make_sql(
     records: dict[str, list[dict[str, object]]], image_rows: list[dict[str, object]]
 ) -> str:
-    lines = ["BEGIN TRANSACTION;"]
+    lines: list[str] = []
     target_records = {**records, "furniture_images": image_rows}
     for table in TABLES:
         columns = TARGET_COLUMNS[table]
@@ -461,7 +461,6 @@ def make_sql(
             values = ", ".join(sql_literal(row[column]) for column in columns)
             quoted_columns = ", ".join(quote_ident(column) for column in columns)
             lines.append(f"INSERT INTO {quote_ident(table)} ({quoted_columns}) VALUES ({values});")
-    lines.append("COMMIT;")
     return "\n".join(lines) + "\n"
 
 

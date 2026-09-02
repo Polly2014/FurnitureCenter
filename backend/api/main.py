@@ -65,7 +65,10 @@ async def lifespan(_: FastAPI):
     Base.metadata.create_all(engine)
     with SessionLocal() as session:
         seed_demo_data(session)
-    yield
+    try:
+        yield
+    finally:
+        engine.dispose()
 
 
 settings = get_settings()

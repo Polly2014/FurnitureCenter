@@ -7,6 +7,35 @@ export type QueryPlan = {
 
 export class PlannerError extends Error {}
 
+const genericCatalogQueries = new Set([
+  '家具',
+  '共享家具',
+  '可共享家具',
+  '可共享的家具',
+  '可用家具',
+  '可用的家具',
+  '物品',
+  '共享物品',
+  '可共享物品',
+  '可共享的物品',
+  '可用物品',
+  '可用的物品',
+  'furniture',
+  'availablefurniture',
+  'shareablefurniture',
+  'sharedfurniture',
+  'items',
+  'availableitems',
+  'shareableitems',
+  'shareditems',
+])
+
+function normalizedQuery(value: string) {
+  const trimmed = value.trim()
+  const genericKey = trimmed.toLocaleLowerCase().replace(/\s+/gu, '')
+  return genericCatalogQueries.has(genericKey) ? null : trimmed
+}
+
 export function validateQueryPlan(
   value: unknown,
   categories: string[],
@@ -35,7 +64,7 @@ export function validateQueryPlan(
   }
   if (typeof availableOnly !== 'boolean') throw new PlannerError('planner availability is invalid')
   return {
-    query: typeof query === 'string' ? query.trim() : null,
+    query: typeof query === 'string' ? normalizedQuery(query) : null,
     category: typeof category === 'string' ? category : null,
     siteId: typeof siteId === 'string' ? siteId : null,
     availableOnly,

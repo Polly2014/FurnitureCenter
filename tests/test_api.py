@@ -8,7 +8,18 @@ from sqlalchemy.orm import sessionmaker
 from backend.api.main import app
 from backend.api.main import settings as app_settings
 from backend.infrastructure.database import Base, get_session
+from backend.infrastructure.database import engine as app_engine
 from backend.infrastructure.seed import seed_demo_data
+
+
+def test_app_lifespan_disposes_the_shared_engine() -> None:
+    with TestClient(app):
+        active_pool = app_engine.pool
+
+    try:
+        assert app_engine.pool is not active_pool
+    finally:
+        app_engine.dispose()
 
 
 def test_catalog_api_returns_seeded_spatial_result(tmp_path: Path) -> None:
@@ -130,3 +141,4 @@ def test_catalog_api_returns_seeded_spatial_result(tmp_path: Path) -> None:
     finally:
         app_settings.agent_mode = original_agent_mode
         app.dependency_overrides.clear()
+        engine.dispose()
